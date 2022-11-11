@@ -1,3 +1,10 @@
+*.sh
+temp*
+logs/
+model/
+out/
+runs/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
