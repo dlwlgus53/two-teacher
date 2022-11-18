@@ -103,5 +103,8 @@ class mwozTrainer:
         
         return belief_state
     
-    def evaluate(self, pred_result, answer):
-        return  evaluate_metrics(pred_result, answer)
+    def evaluate(self, pred_result, answer, unseen_data_path):
+    with open(unseen_data_path, 'r') as file:
+        unseen_data = json.load(file)
+
+    return  evaluate_metrics(pred_result, answer, unseen_data)

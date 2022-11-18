@@ -1,4 +1,5 @@
 import os
+import pdb
 import sys
 import json
 import torch
@@ -22,10 +23,10 @@ from dataclass import DSTMultiWozData
 parser = argparse.ArgumentParser()
 
 # data setting
-parser.add_argument('--train_data_path' , type = str,  default = '.../')
-parser.add_argument('--valid_data_path' , type = str,  default = '../KLUE/train_data.json')
-parser.add_argument('--test_data_path' , type = str,  default = '../KLUE/train_data.json')
-
+parser.add_argument('--train_data_path' , type = str)
+parser.add_argument('--unseen_data_path' , type = str)
+parser.add_argument('--valid_data_path' , type = str)
+parser.add_argument('--test_data_path' , type = str)
 
 # training setting
 parser.add_argument('--seed' ,  type = int, default=1)
@@ -38,6 +39,7 @@ parser.add_argument('--patient', type = int, help = 'prefix for all savings', de
 
 # model parameter
 parser.add_argument('--base_trained', type = str, default = "t5-small", help =" pretrainned model from 🤗")
+parser.add_argument('--pretrained_path', type = str, help =" pretrainned model from 🤗")
 parser.add_argument('--checkpoint_file' , type = str,  help = 'pretrainned model')
 parser.add_argument('--batch_size_per_gpu' , type = int, default=4)
 parser.add_argument('--test_batch_size_per_gpu' , type = int, default=16)
@@ -52,16 +54,20 @@ def init_experiment(seed):
     torch.cuda.manual_seed_all(seed) # if use multi-GPU
 
 
-def load_trained(model, optimizer = None):
-    state_dict = torch.load(args.pretrained_model)
+def load_trained(model, model_path = None, optimizer = None):
+    if args.pretrained_path:
+        state_dict = torch.load(args.pretrained_path)
+    else:
+        state_dict = torch.load(model_path)
     new_state_dict = OrderedDict()
     for k, v in state_dict.items():
-        name = k.replace("module.","") # [7:]remove 'module.' of DataParallel/DistributedDataParallel
-        new_state_dict[name] = v
+        # name = k.replace("module.","") # [7:]remove 'module.' of DataParallel/DistributedDataParallel
+        new_state_dict[k] = v
     model.load_state_dict(new_state_dict)
     if optimizer != None:
         opt_path = "./model/optimizer/" + args.pretrained_model[7:] #todo
         optimizer.load_state_dict(torch.load(opt_path))
+    return model
     
          
     
@@ -71,7 +77,6 @@ def find_test_model(test_output_dir):
     for fname in os.listdir(test_output_dir):
         if fname.startswith('epoch'):
             fileData.append(fname)
-
     fileData = sorted(fileData, key=lambda x : x[-9:])
     return fileData[0:args.test_num]
 
@@ -99,6 +104,17 @@ def evaluate():
         
         if args.detail_log:
             utils.dict_to_json(detail_wrong, f'{args.save_prefix}{test_model_path}.json')
+
+def find_test_model(test_output_dir):
+    import os
+    from operator import itemgetter
+    fileData = []
+    for fname in os.listdir(test_output_dir):
+        if fname.startswith('epoch'):
+            fileData.append(fname)
+    fileData = sorted(fileData, key=lambda x : x[-9:])
+    return fileData[0]
+
 
 if __name__ =="__main__":
     args = parser.parse_args()
@@ -168,11 +184,12 @@ if __name__ =="__main__":
             logger.info(f"Early stop in Epoch {epoch}")
             break
 
-    
-    pred_result = trainer.test(model, test_loader,  test_max_iter)
+    best_model_path =  find_test_model(f"model/{args.save_prefix}/")
+    best_model = load_trained(model, f"model/{args.save_prefix}/{best_model_path}")
+    pred_result = trainer.test(best_model, test_loader,  test_max_iter)
     answer = json.load(open(args.test_data_path , "r"))
-    JGA, slot_acc = trainer.evaluate(pred_result, answer)
-    logger.info(f"JGA : {JGA}, slot_acc : {slot_acc}")
+    JGA, slot_acc, unseen_recall = trainer.evaluate(pred_result, answer, args.unseen_data_path)
+    logger.info(f"JGA : {JGA}, slot_acc : {slot_acc}, unseen_recall : {unseen_recall}")
     
     
     
