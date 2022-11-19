@@ -23,6 +23,7 @@ from dataclass import DSTMultiWozData
 parser = argparse.ArgumentParser()
 
 # data setting
+parser.add_argument('--all_train_data_path' , type = str, default = '../woz-data/MultiWOZ_2.1/train_data.json')
 parser.add_argument('--train_data_path' , type = str)
 parser.add_argument('--unseen_data_path' , type = str)
 parser.add_argument('--valid_data_path' , type = str)
@@ -34,7 +35,6 @@ parser.add_argument('--max_epoch' ,  type = int, default=1)
 parser.add_argument('--gpus', default=4, type=int,help='number of gpus per node')
 parser.add_argument('--save_prefix', type = str, help = 'prefix for all savings', default = '')
 parser.add_argument('--patient', type = int, help = 'prefix for all savings', default = 3)
-
 
 
 # model parameter
@@ -136,15 +136,17 @@ if __name__ =="__main__":
 
     model = nn.DataParallel(model).to("cuda")
     tokenizer = T5Tokenizer.from_pretrained(args.base_trained)
-
+    
+    all_train_dataset = DSTMultiWozData(tokenizer, args.all_train_data_path, 'train')
     train_dataset = DSTMultiWozData(tokenizer, args.train_data_path, 'train')
+
     valid_dataset = DSTMultiWozData(tokenizer,  args.valid_data_path, 'valid')
     test_dataset = DSTMultiWozData(tokenizer,  args.test_data_path, 'test')
 
     train_batch_size = args.batch_size_per_gpu * args.gpus    
     test_batch_size = args.test_batch_size_per_gpu * args.gpus
 
-    train_loader = torch.utils.data.DataLoader(dataset=train_dataset, batch_size=train_batch_size,\
+    train_loader = torch.utils.data.DataLoader(dataset=train_dataset, labeled_dataset = train_dataset, batch_size=train_batch_size,\
      collate_fn=train_dataset.collate_fn)
     valid_loader = torch.utils.data.DataLoader(dataset=valid_dataset, batch_size=test_batch_size,\
      collate_fn=valid_dataset.collate_fn)
