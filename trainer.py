@@ -12,24 +12,62 @@ from evaluate import evaluate_metrics
 
 # from utils import save_pickle
 class mwozTrainer:
-    def __init__(self, tokenizer, optimizer, log_folder):
+    def __init__(self,model, train_batch_size, test_batch_size, tokenizer, optimizer, log_folder, save_prefix, max_epoch, logger_name, \
+    train_data = None, valid_data = None,  test_data = None, patient = 3):
         self.log_folder = log_folder
         self.tokenizer = tokenizer
         self.optimizer = optimizer
         self.writer = SummaryWriter()
-        self.logger = CreateLogger('trainer', os.path.join(log_folder,'info.log'))
+        self.logger = CreateLogger(logger_name, os.path.join(log_folder,'info.log'))
+        self.save_prefix = save_prefix
+        self.train_data = train_data
+        self.valid_data = valid_data
+        self.test_data = test_data
+        self.model = model
+        self.max_epoch = max_epoch
+        self.train_batch_size = train_batch_size
+        self.test_batch_size = test_batch_size
+        self.patient = patient
+
+    def work(self, train_data = None) :
+        if train_data: self.train_data = train_data
+        self.model.cuda()
+        min_loss = float('inf')
+        best_model = ''        
+
+        try_ = 0
+        for epoch in range(self.max_epoch):
+            try_ +=1
+            # self.train(epoch)
+            loss = self.valid(epoch)
+            if loss < min_loss:
+                print(f"epoch {epoch} loss : {loss}, min_loss : {min_loss}")
+                try_ =0
+                min_loss = loss
+                best_model = self.model # deep copy 
+                print(f"epoch {epoch}  loss : {loss}, min_loss : {min_loss}")
+
+            if try_ > self.patient:
+                logger.info(f"Early stop in Epoch {epoch}")
+                break
+
+                # torch.save(self.model.state_dict(), f"model/{self.save_prefix}/epoch_{epoch}_loss_{loss:.4f}.pt")
+                # torch.save(optimizer.state_dict(), f"model/optimizer/{self.save_prefix}/epoch_{epoch}_loss_{loss:.4f}.pt")
         
-    def train(self, model, train_loader, epoch_num, max_iter):
+    def train(self,epoch_num):
+        train_max_iter = int(len(self.train_data) / self.train_batch_size)
+        train_loader = torch.utils.data.DataLoader(dataset=self.train_data, batch_size=self.train_batch_size,\
+            collate_fn=self.train_data.collate_fn)
 
         loss_sum =0 
-        model.train()
+        self.model.train()
 
         for iter, batch in enumerate(train_loader):
             self.optimizer.zero_grad()
             input_ids = batch['input']['input_ids'].to('cuda')
             labels = batch['label']['input_ids'].to('cuda')
 
-            outputs = model(input_ids=input_ids, labels=labels)
+            outputs = self.model(input_ids=input_ids, labels=labels)
             
             loss =outputs.loss.mean()
             loss.backward()
@@ -37,8 +75,8 @@ class mwozTrainer:
             loss_sum += loss.detach()
         
             if (iter + 1) % 50 == 0:
-                self.logger.info(f"training : {iter+1}/{max_iter} loss : {loss_sum/50:.4f}")
-                outputs_text = model.module.generate(input_ids=input_ids)
+                self.logger.info(f"training : {iter+1}/{train_max_iter } loss : {loss_sum/50:.4f}")
+                outputs_text = self.model.module.generate(input_ids=input_ids)
                 self.writer.add_scalar(f'Loss/train_epoch{epoch_num} ', loss_sum/50, iter)
                 loss_sum =0 
 
@@ -55,20 +93,23 @@ class mwozTrainer:
                     # '\n'.join(question_text),iter)
 
 
-    def valid(self, model, valid_loader, epoch_num, max_iter):
-        model.eval()
+    def valid(self,epoch_num):
+        valid_max_iter = int(len(self.valid_data) / self.test_batch_size)
+        valid_loader = torch.utils.data.DataLoader(dataset=self.valid_data, batch_size=self.test_batch_size,\
+            collate_fn=self.valid_data.collate_fn)
+        self.model.eval()
         loss_sum = 0
         self.logger.info("Validation Start")
         with torch.no_grad():
             for iter, batch in enumerate(valid_loader):
                 input_ids = batch['input']['input_ids'].to('cuda')
                 labels = batch['label']['input_ids'].to('cuda')
-                outputs = model(input_ids=input_ids, labels=labels)
+                outputs = self.model(input_ids=input_ids, labels=labels)
                 loss =outputs.loss.mean()
                 
                 loss_sum += loss.detach()
                 if (iter + 1) % 50 == 0:
-                    self.logger.info(f"Validation : {iter+1}/{max_iter}")
+                    self.logger.info(f"Validation : {iter+1}/{valid_max_iter}")
 
         self.writer.add_scalar(f'Loss/valid ', loss_sum/iter, epoch_num)
         self.logger.info(f"Validation loss : {loss_sum/iter:.4f}")
@@ -76,14 +117,19 @@ class mwozTrainer:
 
 
 
-    def test(self, model, test_loader, max_iter):
+    def test(self,epoch_num):
+        test_max_iter = int(len(self.test_data) / self.test_batch_size)
+        test_loader = torch.utils.data.DataLoader(dataset=self.test_data, batch_size=self.test_batch_size,\
+            collate_fn=self.test_data.collate_fn)
+
+
         belief_state= defaultdict(lambda : defaultdict(dict))# dial_id, # turn_id # schema
-        model.eval()
+        self.model.eval()
         loss_sum = 0
         self.logger.info("Test start")
         with torch.no_grad():
             for iter,batch in enumerate(test_loader):
-                outputs_text = model.module.generate(input_ids=batch['input']['input_ids'].to('cuda'))
+                outputs_text = self.model.module.generate(input_ids=batch['input']['input_ids'].to('cuda'))
                 outputs_text =self.tokenizer.batch_decode(outputs_text, skip_special_tokens = True)
                 
                 for idx in range(len(outputs_text)):
@@ -96,7 +142,7 @@ class mwozTrainer:
                     else: belief_state[dial_id][turn_id][schema] = outputs_text[idx]
 
                 if (iter + 1) % 50 == 0:
-                    self.logger.info(f"Test : {iter+1}/{max_iter}")
+                    self.logger.info(f"Test : {iter+1}/{test_max_iter}")
             
             with open(os.path.join(self.log_folder, 'pred_belief.json'), 'w') as fp:
                 json.dump(belief_state, fp, indent=4, ensure_ascii=False)
@@ -104,7 +150,7 @@ class mwozTrainer:
         return belief_state
     
     def evaluate(self, pred_result, answer, unseen_data_path):
-    with open(unseen_data_path, 'r') as file:
-        unseen_data = json.load(file)
+        with open(unseen_data_path, 'r') as file:
+            unseen_data = json.load(file)
 
-    return  evaluate_metrics(pred_result, answer, unseen_data)
+        return  evaluate_metrics(pred_result, answer, unseen_data)

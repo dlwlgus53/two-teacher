@@ -13,19 +13,20 @@ import torch.nn.functional as F
 
 from transformers import T5Tokenizer, T5ForConditionalGeneration,Adafactor
 from transformers.optimization import AdamW, get_linear_schedule_with_warmup
-
 from trainer import mwozTrainer
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
-from dataclass import DSTMultiWozData
+from dataclass import DSTMultiWozData, VerifyData
+
+
+
 
 parser = argparse.ArgumentParser()
 
 # data setting
 parser.add_argument('--all_train_data_path' , type = str, default = '../woz-data/MultiWOZ_2.1/train_data.json')
-parser.add_argument('--train_data_path' , type = str)
-parser.add_argument('--unseen_data_path' , type = str)
+parser.add_argument('--labeled_data_path' , type = str)
 parser.add_argument('--valid_data_path' , type = str)
 parser.add_argument('--test_data_path' , type = str)
 
@@ -129,31 +130,25 @@ if __name__ =="__main__":
     logger.info(args)
     writer = SummaryWriter()
 
-    model = T5ForConditionalGeneration.from_pretrained(args.base_trained, return_dict=True)
+    teacher = T5ForConditionalGeneration.from_pretrained(args.base_trained, return_dict=True)
+    student = T5ForConditionalGeneration.from_pretrained(args.base_trained, return_dict=True)
+    verifier = T5ForConditionalGeneration.from_pretrained(args.base_trained, return_dict=True)
     
     if args.checkpoint_file:
         model = load_traiend(model, args.checkpoint_file)
 
-    model = nn.DataParallel(model).to("cuda")
+    teacher = nn.DataParallel(teacher)
+    student = nn.DataParallel(student)
+    verifier = nn.DataParallel(verifier)
     tokenizer = T5Tokenizer.from_pretrained(args.base_trained)
     
-    all_train_dataset = DSTMultiWozData(tokenizer, args.all_train_data_path, 'train')
-    train_dataset = DSTMultiWozData(tokenizer, args.train_data_path, 'train')
-
+    labeled_dataset = DSTMultiWozData(tokenizer, args.labeled_data_path, 'train') # 라벨된것만 나오는거, 확실한거지?
+    all_train_dataset =  DSTMultiWozData(tokenizer,args.all_train_data_path, 'train') # 전체 데이터셋
+    verify_dataset = VerifyData(tokenizer, labeled_dataset.get_data())
     valid_dataset = DSTMultiWozData(tokenizer,  args.valid_data_path, 'valid')
     test_dataset = DSTMultiWozData(tokenizer,  args.test_data_path, 'test')
 
-    train_batch_size = args.batch_size_per_gpu * args.gpus    
-    test_batch_size = args.test_batch_size_per_gpu * args.gpus
-
-    train_loader = torch.utils.data.DataLoader(dataset=train_dataset, labeled_dataset = train_dataset, batch_size=train_batch_size,\
-     collate_fn=train_dataset.collate_fn)
-    valid_loader = torch.utils.data.DataLoader(dataset=valid_dataset, batch_size=test_batch_size,\
-     collate_fn=valid_dataset.collate_fn)
-    test_loader = torch.utils.data.DataLoader(dataset=test_dataset, batch_size=test_batch_size,\
-     collate_fn=test_dataset.collate_fn)
-
-    optimizer = Adafactor(model.parameters(),lr=1e-3,
+    optimizer = Adafactor(teacher.parameters(),lr=1e-3, # 이게 선생님것만 해도 되나??
                     eps=(1e-30, 1e-3),
                     clip_threshold=1.0,
                     decay_rate=-0.8,
@@ -164,34 +159,66 @@ if __name__ =="__main__":
                     warmup_init=False,
                     )
 
-    min_loss = float('inf')
-    best_performance = {}
-    train_max_iter = int(len(train_dataset) / train_batch_size)
-    valid_max_iter = int(len(valid_dataset) / test_batch_size)
-    test_max_iter = int(len(test_dataset) / test_batch_size)
+    teacher_trainer = mwozTrainer(
+        model = teacher,
+        valid_data = valid_dataset,
+        test_data = test_dataset,
+        train_batch_size = args.batch_size_per_gpu * args.gpus ,
+        test_batch_size = args.test_batch_size_per_gpu * args.gpus,
+        tokenizer = tokenizer,
+        optimizer = optimizer,
+        log_folder = log_folder,
+        save_prefix = args.save_prefix,
+        max_epoch = args.max_epoch,
+        logger_name = 'teacher')
+    
+    student_trainer = mwozTrainer(
+        model = student,
+        valid_data = valid_dataset,
+        test_data = test_dataset,
+        train_batch_size = args.batch_size_per_gpu * args.gpus ,
+        test_batch_size = args.test_batch_size_per_gpu * args.gpus,
+        tokenizer = tokenizer,
+        optimizer = optimizer,
+        log_folder = log_folder,
+        save_prefix = args.save_prefix,
+        max_epoch = args.max_epoch,
+        logger_name = 'student')
 
 
-    trainer = mwozTrainer(tokenizer, optimizer, log_folder)
-    try_count = 0
-    for epoch in range(args.max_epoch):
-        try_count +=1
-        trainer.train(model, train_loader,epoch, train_max_iter)
-        loss = trainer.valid(model, valid_loader, epoch, valid_max_iter)
-        if loss < min_loss:
-            try_count =0
-            min_loss = loss
-            torch.save(model.state_dict(), f"model/{args.save_prefix}/epoch_{epoch}_loss_{loss:.4f}.pt")
-            torch.save(optimizer.state_dict(), f"model/optimizer/{args.save_prefix}/epoch_{epoch}_loss_{loss:.4f}.pt")
-        if try_count > args.patient:
-            logger.info(f"Early stop in Epoch {epoch}")
-            break
 
-    best_model_path =  find_test_model(f"model/{args.save_prefix}/")
-    best_model = load_trained(model, f"model/{args.save_prefix}/{best_model_path}")
-    pred_result = trainer.test(best_model, test_loader,  test_max_iter)
-    answer = json.load(open(args.test_data_path , "r"))
-    JGA, slot_acc, unseen_recall = trainer.evaluate(pred_result, answer, args.unseen_data_path)
-    logger.info(f"JGA : {JGA}, slot_acc : {slot_acc}, unseen_recall : {unseen_recall}")
+    verify_trainer = mwozTrainer(
+        model = teacher,
+        valid_data = valid_dataset,
+        test_data = test_dataset,
+        train_batch_size = args.batch_size_per_gpu * args.gpus ,
+        test_batch_size = args.test_batch_size_per_gpu * args.gpus,
+        tokenizer = tokenizer,
+        optimizer = optimizer,
+        log_folder = log_folder,
+        save_prefix = args.save_prefix,
+        max_epoch = args.max_epoch,
+        logger_name = 'verifier')
+
+
+
+    for i in range(10):
+        teacher_trainer.work(train_data = labeled_dataset) # keeps chainign
+        verify_trainer.work(train_data = labeled_dataset)
+        made_label = teacher_trainer.make_label(data = all_train_dataset)
+        verified_label = verify_the_label(made_label, verify)
+        labeled_dataset.update(verified_label)
+        JGA,loss = student_trainer.work(train_data = labeled_dataset)
+        print(JGA, loss)
+        teacher_trainer.set_model(student_trainer.get_model())
+        
+ 
+    # best_model_path =  find_test_model(f"model/{args.save_prefix}/")
+    # best_model = load_trained(model, f"model/{args.save_prefix}/{best_model_path}")
+    # pred_result = trainer.test(best_model, test_loader,  test_max_iter)
+    # answer = json.load(open(args.test_data_path , "r"))
+    # JGA, slot_acc, unseen_recall = trainer.evaluate(pred_result, answer, args.unseen_data_path)
+    # logger.info(f"JGA : {JGA}, slot_acc : {slot_acc}, unseen_recall : {unseen_recall}")
     
     
     

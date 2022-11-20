@@ -13,13 +13,13 @@ import config as cfg
 from utils import make_label_key, dictionary_split
 
 class VerifyData:
-    def __init__(self, tokenizer, raw_path, labeled_data):
+    def __init__(self, tokenizer, raw_dataset):
 
-        self.labeled_data = labeled_data
         self.tokenizer = tokenizer
         self.max_length = tokenizer.model_max_length
-        raw_dataset = json.load(open(raw_path , "r"))
-        question, answer = self.seperate_data(raw_dataset, self.labeled_data)
+        self.raw_dataset = raw_dataset
+        self.value_list = self.make_value_list(raw_dataset)
+        question, answer = self.seperate_data(raw_dataset)
         assert len(question) == len(answer)
 
         self.target = answer
@@ -28,16 +28,29 @@ class VerifyData:
     def __len__(self):
         return len(self.question)
 
-    def set_labeled_data(labeled_data):
-        self.labeled_data = labeled_data
+    def make_value_list(self, dataset):
+        values = []
+        for d_id in dataset.keys():
+            dialogue = dataset[d_id]['log']
+            for t_id, turn in enumerate(dialogue):
+                for key_idx, key in enumerate(ontology.QA['all-domain']): # TODO
+                    if key in turn['belief']: 
+                        belief_answer = turn['belief'][key]
+                        if isinstance(belief_answer, list) : belief_answer= belief_answer[0] # in muptiple type, a == ['sunday',6]
+                    else:
+                        belief_answer = ontology.QA['NOT_MENTIONED']
+
+                    values.append(belief_answer)
         
+        return list(set(values))
+                    
 
 
     def find_different_answer(self, target):
-        return random.choice(list(set(self.labeled_data.values()) - set([target])))
+        return random.choice(list(set(self.value_list) - set([target])))
 
 
-    def seperate_data(self, dataset, labeled_data):
+    def seperate_data(self, dataset):
         question = []
         answer = []
 
@@ -48,24 +61,26 @@ class VerifyData:
                 turn_text += cfg.USER_tk
                 turn_text += turn['user']
                 for key_idx, key in enumerate(ontology.QA['all-domain']): # TODO
-                    label_key = make_label_key(d_id, t_id, key)
-                    if label_key in self.labeled_data:
-                        
-                        
-                        q1 = f"verify QA context : {turn_text}, question : {ontology.QA[key]['description1']}, \
-                        Answer : {labeled_data[label_key]}"
-                        a1 = 'true'
 
-                        q2 = f"verify QA context : {turn_text}, question : {ontology.QA[key]['description1']}, \
-                        Answer : {self.find_different_answer(labeled_data[label_key])}"
-                        a2 = 'false'
+                    if key in turn['belief']: 
+                        belief_answer = turn['belief'][key]
+                        if isinstance(belief_answer, list) : belief_answer= belief_answer[0] # in muptiple type, a == ['sunday',6]
+                    else:
+                        belief_answer = ontology.QA['NOT_MENTIONED']
 
 
-                        question.append(q1)
-                        question.append(q2)
+                    q1 = f"verify QA context : {turn_text}, question : {ontology.QA[key]['description1']},Answer : {belief_answer}"
+                    a1 = 'true'
 
-                        answer.append(a1)
-                        answer.append(a2)
+                    q2 = f"verify QA context : {turn_text}, question : {ontology.QA[key]['description1']}, Answer : {self.find_different_answer(belief_answer)}"
+                    a2 = 'false'
+
+
+                    question.append(q1)
+                    question.append(q2)
+
+                    answer.append(a1)
+                    answer.append(a2)
 
                 turn_text += cfg.SYSTEM_tk
                 turn_text += turn['response']
@@ -113,19 +128,14 @@ class VerifyData:
 
 
 class DSTMultiWozData:
-    def __init__(self,  tokenizer, data_path, data_type, labeled_data_path = None):
+    def __init__(self,  tokenizer, data_path, data_type):
         self.data_type = data_type
         self.tokenizer = tokenizer
         self.max_length = tokenizer.model_max_length
-        self.labeled_data = None
 
-        if data_type == 'train':
-            labeled_dataset = json.load(open(labeled_data_path , "r"))
-            self.labeled_data = self.init_make_labeled_data(labeled_dataset)
+        self.raw_dataset = json.load(open(data_path , "r"))
 
-        raw_dataset = json.load(open(data_path , "r"))
-
-        turn_id, dial_id,  question, schema, answer, dial_text = self.seperate_data(raw_dataset, self.labeled_data)
+        turn_id, dial_id,  question, schema, answer, dial_text = self.seperate_data(self.raw_dataset)
 
         assert len(turn_id) == len(dial_id) == len(question)\
             == len(schema) == len(answer) == len(dial_text)
@@ -138,37 +148,13 @@ class DSTMultiWozData:
         self.schema = schema
         self.dial_text = dial_text
 
-    def add_to_labeled(self, new_data):
-        dataset = new_data
-        for key, value in dataset.items():
-            self.labeled_data[key] = value
-
-    def get_labeled_data(self):
-        return self.labeled_data
-
-    def init_make_labeled_data(self, labeled_dataset):
-        labeled_data = {}
-        dataset = labeled_dataset
-        for d_id in dataset.keys():
-            dialogue = dataset[d_id]['log']
-            for t_id, turn in enumerate(dialogue):
-                for key_idx, key in enumerate(ontology.QA['all-domain']): # TODO
-                    label_key = make_label_key(d_id, t_id, key)
-                    if key in turn['belief']: 
-                        label_value = turn['belief'][key]
-                        if isinstance(label_value, list) : label_value= label_value[0] # in muptiple type, a == ['sunday',6]
-                    else:
-                        label_value = ontology.QA['NOT_MENTIONED']
-                    labeled_data[label_key] = label_value
-        
-        return labeled_data
-
-
-
     def __len__(self):
         return len(self.dial_id)
 
-    def seperate_data(self, dataset, labeled_data):
+    def get_data(self):
+        return self.raw_dataset
+
+    def seperate_data(self, dataset):
         question = []
         answer = []
         schema = []
@@ -187,14 +173,12 @@ class DSTMultiWozData:
                 for key_idx, key in enumerate(ontology.QA['all-domain']): # TODO
                     q = ontology.QA[key]['description1']
                     label_key = make_label_key(d_id, t_id, key)
-                    if self.data_type == 'train' and label_key in labeled_data:
-                        a = labeled_data[label_key]
+
+                    if key in turn['belief']: 
+                        a = turn['belief'][key]
+                        if isinstance(a, list) : a= a[0] # in muptiple type, a == ['sunday',6]
                     else:
-                        if key in turn['belief']: 
-                            a = turn['belief'][key]
-                            if isinstance(a, list) : a= a[0] # in muptiple type, a == ['sunday',6]
-                        else:
-                            a = ontology.QA['NOT_MENTIONED']
+                        a = ontology.QA['NOT_MENTIONED']
 
                     schema.append(key)
                     answer.append(a)
@@ -269,7 +253,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--model_name', type = str, default = 't5-small')
     parser.add_argument('--all_train_data_path' , type = str, default='../woz-data/MultiWOZ_2.1/split0.01/train_data10.01.json')
-    parser.add_argument('--train_data_path' , type = str, default='../woz-data/MultiWOZ_2.1/split0.01/labeled.json')
+    parser.add_argument('--labeled_data_path' , type = str, default='../woz-data/MultiWOZ_2.1/split0.01/labeled.json')
     parser.add_argument('--base_trained', type = str, default = "t5-small", help =" pretrainned model from 🤗")
 
 
@@ -277,13 +261,13 @@ if __name__ == '__main__':
     args = parser.parse_args()
     tokenizer = T5Tokenizer.from_pretrained(args.base_trained)
 
-    dataset = DSTMultiWozData(tokenizer,args.all_train_data_path, data_type = 'train', labeled_data_path = args.train_data_path)
+    dataset = DSTMultiWozData(tokenizer,args.all_train_data_path, data_type = 'train', labeled_data_path = args.labeled_data_path)
 
     labeled_data = dataset.get_labeled_data()
     train_LD, dev_LD = dictionary_split(labeled_data)
 
-    verify_train_dataset = VerifyData(tokenizer, args.train_data_path, train_LD)
-    verify_dev_dataset = VerifyData(tokenizer, args.train_data_path, dev_LD)
+    verify_train_dataset = VerifyData(tokenizer, args.labeled_data_path, train_LD)
+    verify_dev_dataset = VerifyData(tokenizer, args.labeled_data_path, dev_LD)
 
     data_loader = torch.utils.data.DataLoader(dataset=dataset, batch_size=16, collate_fn=dataset.collate_fn)
     verify_loader = torch.utils.data.DataLoader(dataset=verify_train_dataset, batch_size=16, collate_fn=verify_train_dataset.collate_fn)
