@@ -1,3 +1,4 @@
+import copy
 import pdb
 import sys
 import torch
@@ -13,17 +14,80 @@ import config as cfg
 from utils import make_label_key, dictionary_split
 
 class VerifyData:
-    def __init__(self, tokenizer, raw_dataset):
+    def __init__(self, tokenizer, raw_dataset, data_type):
 
         self.tokenizer = tokenizer
         self.max_length = tokenizer.model_max_length
         self.raw_dataset = raw_dataset
         self.value_list = self.make_value_list(raw_dataset)
-        question, answer = self.seperate_data(raw_dataset)
+        self.data_type = data_type
+
+        dial_id, turn_id, schema, question, answer = self.seperate_data(raw_dataset)
         assert len(question) == len(answer)
 
+        # 원본 보호가 되는가?
         self.target = answer
+        self.turn_id = turn_id
+        self.dial_id = dial_id
         self.question = question
+        self.schema = schema
+
+        
+        self.o_target = copy.deepcopy(self.target) 
+        self.o_question = copy.deepcopy(self.question) 
+        self.o_turn_id = copy.deepcopy(self.turn_id)
+        self.o_dial_id = copy.deepcopy(self.dial_id)
+        self.o_schema = copy.deepcopy(self.schema)
+
+    def reverse_update(self):
+        self.target = copy.deepcopy(self.o_target)
+        self.question = copy.deepcopy(self.o_question)
+        self.turn_id = copy.deepcopy(self.o_turn_id)
+        self.dial_id = copy.deepcopy(self.o_dial_id)
+        self.schema = copy.deepcopy(self.o_schema)
+
+    def update(self, data_path, pseudo_label):
+        dataset = json.load(open(data_path , "r"))
+        
+        for d_id in dataset.keys():
+            dialogue = dataset[d_id]['log']
+            turn_text = ""
+            for t_id, turn in enumerate(dialogue):
+                turn_text += cfg.USER_tk
+                turn_text += turn['user']
+                for key_idx, key in enumerate(ontology.QA['all-domain']): # TODO
+
+                    if key in turn['belief']: 
+                        belief_answer = turn['belief'][key]
+                        if isinstance(belief_answer, list) : belief_answer= belief_answer[0] # in muptiple type, a == ['sunday',6]
+                    else:
+                        belief_answer = ontology.QA['NOT_MENTIONED']
+
+                    q1 = f"verify QA context : {turn_text}, question : {ontology.QA[key]['description1']},Answer : {belief_answer}"
+                    a1 = 'true'
+
+                    q2 = f"verify QA context : {turn_text}, question : {ontology.QA[key]['description1']}, Answer : {self.find_different_answer(belief_answer)}"
+                    a2 = 'false'
+                    self.question.append(q1) 
+                    self.target.append(a1)
+                    self.schema.append(key)
+                    self.dial_id.append(d_id)
+                    self.turn_id.append(t_id)
+
+                    if self.data_type != 'test':
+                        self.question.append(q2)
+                        self.target.append(a2)
+                        self.schema.append(key)
+                        self.dial_id.append(d_id)
+                        self.turn_id.append(t_id)
+
+
+                turn_text += cfg.SYSTEM_tk
+                turn_text += turn['response']
+
+
+
+
 
     def __len__(self):
         return len(self.question)
@@ -53,8 +117,14 @@ class VerifyData:
     def seperate_data(self, dataset):
         question = []
         answer = []
-
+        schema = []
+        dial_id = []
+        turn_id = []
+        K =0 
         for d_id in dataset.keys():
+            # K +=1
+            # if K>10:
+                break
             dialogue = dataset[d_id]['log']
             turn_text = ""
             for t_id, turn in enumerate(dialogue):
@@ -74,18 +144,21 @@ class VerifyData:
 
                     q2 = f"verify QA context : {turn_text}, question : {ontology.QA[key]['description1']}, Answer : {self.find_different_answer(belief_answer)}"
                     a2 = 'false'
-
-
                     question.append(q1)
-                    question.append(q2)
-
                     answer.append(a1)
-                    answer.append(a2)
-
+                    schema.append(key)
+                    dial_id.append(d_id)
+                    turn_id.append(t_id)
+                    if self.data_type != 'test':
+                        question.append(q2)
+                        answer.append(a2)
+                        schema.append(key)
+                        dial_id.append(d_id)
+                        turn_id.append(t_id)
                 turn_text += cfg.SYSTEM_tk
                 turn_text += turn['response']
 
-        return question, answer
+        return dial_id, turn_id, schema, question, answer 
 
 
     def encode(self, texts ,return_tensors="pt"):
@@ -107,7 +180,10 @@ class VerifyData:
     def __getitem__(self, index):
         target = self.target[index]
         question = self.question[index]
-        return {"target": target, "question" : question}
+        turn_id = self.turn_id[index]
+        dial_id = self.dial_id[index]
+        schema = self.schema[index]
+        return {"question": question, "target": target, "turn_id" : turn_id,"dial_id" : dial_id, "schema":schema }
     
 
     def collate_fn(self, batch):
@@ -117,6 +193,10 @@ class VerifyData:
         """
         input_source = [x["question"] for x in batch]
         target = [x["target"] for x in batch]
+        turn_id = [x["turn_id"] for x in batch]
+        dial_id = [x["dial_id"] for x in batch]
+        schema = [x["schema"] for x in batch]
+
 
         source = self.encode(input_source)
         source = [{k:v.squeeze() for (k,v) in s.items()} for s in source]
@@ -124,7 +204,8 @@ class VerifyData:
 
         target = self.tokenizer.batch_encode_plus(target, max_length = self.max_length, \
         padding=True, return_tensors='pt', truncation = True)
-        return {"input": source, "label": target}
+
+        return {"input": source, "label": target, "turn_id" : turn_id,"dial_id" : dial_id, "schema":schema }
 
 
 class DSTMultiWozData:
@@ -140,7 +221,6 @@ class DSTMultiWozData:
         assert len(turn_id) == len(dial_id) == len(question)\
             == len(schema) == len(answer) == len(dial_text)
             
-        
         self.target = answer
         self.turn_id = turn_id
         self.dial_id = dial_id
@@ -148,8 +228,53 @@ class DSTMultiWozData:
         self.schema = schema
         self.dial_text = dial_text
 
+        self.o_target = copy.deepcopy(self.target)
+        self.o_turn_id = copy.deepcopy(self.turn_id) 
+        self.o_dial_id = copy.deepcopy(self.dial_id) 
+        self.o_question = copy.deepcopy(self.question) 
+        self.o_schema = copy.deepcopy(self.schema) 
+        self.o_dial_text = copy.deepcopy(self.dial_text) 
+
     def __len__(self):
         return len(self.dial_id)
+
+    
+    def reverse_update(self):
+        self.target = copy.deepcopy(self.o_target)
+        self.question = copy.deepcopy(self.o_question)
+        self.turn_id = copy.deepcopy(self.o_turn_id)
+        self.dial_id = copy.deepcopy(self.o_dial_id)
+        self.schema = copy.deepcopy(self.o_schema)
+        self.dial_text = copy.deepcopy(self.o_dial_text)
+
+    def update(self, data_path, pseudo_label):
+
+        dataset = json.load(open(data_path , "r"))
+        
+        for d_id in dataset.keys():
+            dialogue = dataset[d_id]['log']
+            turn_text = ""
+
+            for t_id, turn in enumerate(dialogue):
+                turn_text += cfg.USER_tk
+                turn_text += turn['user']
+                for key_idx, key in enumerate(ontology.QA['all-domain']): # TODO
+                    q = ontology.QA[key]['description1']
+                    label_key = make_label_key(d_id, t_id, key)
+                    if label_key in pseudo_label:
+
+                        a = pseudo_label[label_key]
+
+                        self.schema.append(key)
+                        self.target.append(a)
+                        self.question.append(q)
+                        self.dial_id.append(d_id)
+                        self.turn_id.append(t_id)
+                        self.dial_text.append(turn_text)
+
+                turn_text += cfg.SYSTEM_tk
+                turn_text += turn['response']
+
 
     def get_data(self):
         return self.raw_dataset

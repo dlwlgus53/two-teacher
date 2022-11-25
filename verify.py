@@ -8,12 +8,11 @@ from utils import*
 from logger_conf import CreateLogger
 from collections import defaultdict
 from torch.utils.tensorboard import SummaryWriter
+from evaluate import evaluate_metrics
 from utils import make_label_key
-from transformers import T5Tokenizer, T5ForConditionalGeneration,Adafactor
-
 # from utils import save_pickle
 class mwozTrainer:
-    def __init__(self,model, train_batch_size, test_batch_size, tokenizer, optimizer, log_folder, save_prefix, max_epoch, logger_name, evaluate_fnc, belief_type, \
+    def __init__(self,model, train_batch_size, test_batch_size, tokenizer, optimizer, log_folder, save_prefix, max_epoch, logger_name, \
     train_data = None, valid_data = None,  test_data = None, patient = 3):
         self.log_folder = log_folder
         self.tokenizer = tokenizer
@@ -29,12 +28,10 @@ class mwozTrainer:
         self.train_batch_size = train_batch_size
         self.test_batch_size = test_batch_size
         self.patient = patient
-        self.evaluate_fnc = evaluate_fnc
-        self.belief_type= belief_type
 
-    def work(self, train_data = None, test = False, save = False) :
-
+    def work(self, train_data = None) :
         if train_data: self.train_data = train_data
+        self.model.cuda()
         min_loss = float('inf')
         best_model = ''        
 
@@ -53,38 +50,22 @@ class mwozTrainer:
                 break
 
         self.model = best_model
-        if save == True:
-            torch.save(self.model.state_dict(), f"model/{self.save_prefix}/epoch_{epoch}_loss_{min_loss:.4f}.pt")
-            # torch.save(optimizer.state_dict(), f"model/optimizer/{self.save_prefix}/epoch_{epoch}_loss_{min_loss:.4f}.pt")
-        if test == True:
-            if self.belief_type:
-                gold, pred = self.belief_test(epoch)
-            else :
-                gold, pred = self.test(epoch)
 
-            test_score = self.evaluate_fnc(gold, pred)
-            return test_score
+                # torch.save(self.model.state_dict(), f"model/{self.save_prefix}/epoch_{epoch}_loss_{loss:.4f}.pt")
+                # torch.save(optimizer.state_dict(), f"model/optimizer/{self.save_prefix}/epoch_{epoch}_loss_{loss:.4f}.pt")
 
-    def set_model(self,model):
-        self.model = model
-    
-    def get_model(self):
-        return self.model 
-
-    def init_model(self, base_model):
-        self.model = T5ForConditionalGeneration.from_pretrained(base_model, return_dict=True)
 
     def make_label(self, data):
         generated_label = {}
         max_iter = int(len(data) / self.test_batch_size)
         loader = torch.utils.data.DataLoader(dataset=data, batch_size=self.test_batch_size,\
-            collate_fn=data.collate_fn)
+            collate_fn=self.data.collate_fn)
 
         self.model.eval()
         self.logger.info("Labeling Start")
 
         with torch.no_grad():
-            for iter,batch in enumerate(loader):
+            for iter,batch in enumerate(test_loader):
                 # make_label_key(dial_id, turn_id, slot)
                 outputs_text = self.model.module.generate(input_ids=batch['input']['input_ids'].to('cuda'))
                 outputs_text =self.tokenizer.batch_decode(outputs_text, skip_special_tokens = True)
@@ -92,13 +73,14 @@ class mwozTrainer:
                     dial_id = batch['dial_id'][idx]
                     turn_id = batch['turn_id'][idx]
                     slot = batch['schema'][idx]
+                    pdb.set_trace()
                     label_key = make_label_key(dial_id, turn_id, slot)
                     generated_label[label_key] = outputs_text[idx]
 
                 if (iter + 1) % 50 == 0:
-                    self.logger.info(f"Labeling : {iter+1}/{max_iter}")
+                    self.logger.info(f"Test : {iter+1}/{test_max_iter}")
 
-        return  generated_label # format? {key : value is ok}
+        return  labeled_dataset # format? {key : value is ok}
 
         
     def train(self,epoch_num):
@@ -113,6 +95,7 @@ class mwozTrainer:
             self.optimizer.zero_grad()
             input_ids = batch['input']['input_ids'].to('cuda')
             labels = batch['label']['input_ids'].to('cuda')
+
             outputs = self.model(input_ids=input_ids, labels=labels)
             
             loss =outputs.loss.mean()
@@ -162,32 +145,12 @@ class mwozTrainer:
         return  loss_sum/iter
 
 
+
     def test(self,epoch_num):
-        answer, pred = [], []
         test_max_iter = int(len(self.test_data) / self.test_batch_size)
         test_loader = torch.utils.data.DataLoader(dataset=self.test_data, batch_size=self.test_batch_size,\
             collate_fn=self.test_data.collate_fn)
-        self.model.eval()
-        loss_sum = 0
-        self.logger.info("Test start")
-        with torch.no_grad():
-            for iter,batch in enumerate(test_loader):
-                outputs_text = self.model.module.generate(input_ids=batch['input']['input_ids'].to('cuda'))
-                outputs_text =self.tokenizer.batch_decode(outputs_text, skip_special_tokens = True)
-                label =self.tokenizer.batch_decode(batch['label']['input_ids'], skip_special_tokens = True)
-                pred.extend(outputs_text)
-                answer.extend(label)
-                for idx in range(len(outputs_text)):
-                    outputs_text[idx]
-        return answer, pred
-    
 
-
-
-    def belief_test(self,epoch_num):
-        test_max_iter = int(len(self.test_data) / self.test_batch_size)
-        test_loader = torch.utils.data.DataLoader(dataset=self.test_data, batch_size=self.test_batch_size,\
-            collate_fn=self.test_data.collate_fn)
 
         belief_state= defaultdict(lambda : defaultdict(dict))# dial_id, # turn_id # schema
         self.model.eval()
@@ -213,8 +176,10 @@ class mwozTrainer:
             with open(os.path.join(self.log_folder, 'pred_belief.json'), 'w') as fp:
                 json.dump(belief_state, fp, indent=4, ensure_ascii=False)
         
-        answer = self.test_data.get_data()
-
-        return answer, belief_state
+        return belief_state
     
+    def evaluate(self, pred_result, answer, unseen_data_path):
+        with open(unseen_data_path, 'r') as file:
+            unseen_data = json.load(file)
 
+        return  evaluate_metrics(pred_result, answer, unseen_data)

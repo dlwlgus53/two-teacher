@@ -4,8 +4,14 @@ import pickle
 import ontology
 import csv, json
 from collections import defaultdict, Counter
+from sklearn.metrics import accuracy_score
 
-def evaluate_metrics(all_prediction, raw_file, unseen_data):
+
+
+def acc_metric(gold, pred):
+    return accuracy_score(gold, pred)
+
+def jga_metric(raw_file, all_prediction):
     # domain, schema accuracy 는 틀린부분이 있어서 return 하지 않음.
     
     schema = ontology.QA['all-domain'] # next response 는 제외
@@ -15,7 +21,6 @@ def evaluate_metrics(all_prediction, raw_file, unseen_data):
         if key not in all_prediction.keys(): continue
         dial = raw_file[key]['log']
         for turn_idx, turn in enumerate(dial):
-            belief_unseen_label = []
             try:
                 raw_belief_label = turn['belief']
                 if type(list(all_prediction[key].keys())[0]) is str:
@@ -27,9 +32,7 @@ def evaluate_metrics(all_prediction, raw_file, unseen_data):
             belief_label = [f'{k} : {v}' for (k,v) in raw_belief_label.items()] 
             belief_pred = [f'{k} : {v}' for (k,v) in raw_belief_pred.items()] 
 
-            for (k,v) in raw_belief_label.items():
-                if k in unseen_data and v in unseen_data[k]:
-                    belief_unseen_label.append(f'{k} : {v}')
+
 
             if set(belief_label) == set(belief_pred):
                 joint_acc += 1
@@ -38,13 +41,11 @@ def evaluate_metrics(all_prediction, raw_file, unseen_data):
             acc = compute_acc(belief_label, belief_pred, schema)
             micro_f1 += cal_f1(belief_label, belief_pred)
 
-            if len(belief_unseen_label) != 0:
-                unseen_recall += cal_num_same(belief_unseen_label, belief_pred,)
-                usr_cnt += len(belief_unseen_label)
+
 
             turn_acc += acc
     
-    return joint_acc/turn_cnt, turn_acc/turn_cnt, unseen_recall/usr_cnt
+    return joint_acc/turn_cnt, turn_acc/turn_cnt, 
 
 def save_pickle(file_name, data):
     with open(file_name, 'wb') as f:
