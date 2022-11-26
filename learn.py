@@ -37,9 +37,10 @@ parser.add_argument('--gpus', default=4, type=int,help='number of gpus per node'
 parser.add_argument('--save_prefix', type = str, help = 'prefix for all savings', default = '')
 parser.add_argument('--patient', type = int, help = 'prefix for all savings', default = 3)
 
-
 # model parameter
 parser.add_argument('--base_trained', type = str, default = "t5-small", help =" pretrainned model from 🤗")
+parser.add_argument('--teacher_model_path', type = str,  help =" pretrainned model from 🤗")
+parser.add_argument('--V_teacher_model_path', type = str,  help =" pretrainned model from 🤗")
 parser.add_argument('--pretrained_path', type = str, help =" pretrainned model from 🤗")
 parser.add_argument('--checkpoint_file' , type = str,  help = 'pretrainned model')
 parser.add_argument('--batch_size_per_gpu' , type = int, default=4)
@@ -221,9 +222,9 @@ if __name__ =="__main__":
         belief_type = False,
         **trainer_setting)
 
-    # teacher_trainer.work(train_data = labeled_dataset,  test = True) 
-    Vscore = V_teacher_trainer.work(train_data = V_train_dataset, test = True) 
-    logger.info(f"ACC : {Vscore}")
+    teacher_trainer.work(train_data = labeled_dataset,  test = True, save = True, \
+        train =False, model_path = args.teacher_model_path) 
+    V_teacher_trainer.work(train_data = V_train_dataset, test = True, save = True) 
 
 
     for i in range(args.max_epoch):

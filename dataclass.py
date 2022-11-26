@@ -9,7 +9,7 @@ import progressbar
 import ontology
 import random
 import argparse
-from transformers import T5Tokenizer
+from transformers import  AutoTokenizer
 import config as cfg
 from utils import make_label_key, dictionary_split
 
@@ -124,7 +124,7 @@ class VerifyData:
         for d_id in dataset.keys():
             # K +=1
             # if K>10:
-                break
+                # break
             dialogue = dataset[d_id]['log']
             turn_text = ""
             for t_id, turn in enumerate(dialogue):
@@ -384,7 +384,7 @@ if __name__ == '__main__':
 
     # /home/jihyunlee/woz-data/MultiWOZ_2.1/split0.01/labeled.json
     args = parser.parse_args()
-    tokenizer = T5Tokenizer.from_pretrained(args.base_trained)
+    tokenizer = AutoTokenizer.from_pretrained(args.base_trained)
 
     dataset = DSTMultiWozData(tokenizer,args.all_train_data_path, data_type = 'train', labeled_data_path = args.labeled_data_path)
 

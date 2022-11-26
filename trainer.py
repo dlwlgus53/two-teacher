@@ -9,7 +9,9 @@ from logger_conf import CreateLogger
 from collections import defaultdict
 from torch.utils.tensorboard import SummaryWriter
 from utils import make_label_key
-from transformers import T5Tokenizer, T5ForConditionalGeneration,Adafactor
+from collections import OrderedDict
+
+from transformers import AutoModel
 
 # from utils import save_pickle
 class mwozTrainer:
@@ -20,7 +22,7 @@ class mwozTrainer:
         self.optimizer = optimizer
         self.writer = SummaryWriter()
         self.logger = CreateLogger(logger_name, os.path.join(log_folder,'info.log'))
-        self.save_prefix = save_prefix
+        self.save_prefix = f'{save_prefix}_{logger_name}'
         self.train_data = train_data
         self.valid_data = valid_data
         self.test_data = test_data
@@ -31,38 +33,48 @@ class mwozTrainer:
         self.patient = patient
         self.evaluate_fnc = evaluate_fnc
         self.belief_type= belief_type
+        os.makedirs(f"model/{self.save_prefix}",  exist_ok=True)
 
-    def work(self, train_data = None, test = False, save = False) :
+    def work(self, train_data = None, test = False, train = True, save = False, model_path = None) :
 
+        if train == False and model_path == None:
+            self.logger.error("train is False and model_path is NOne")
         if train_data: self.train_data = train_data
         min_loss = float('inf')
         best_model = ''        
 
-        try_ = 0
-        for epoch in range(self.max_epoch):
-            try_ +=1
-            self.train(epoch)
-            loss = self.valid(epoch)
-            if loss < min_loss:
-                try_ =0
-                min_loss = loss
-                best_model = self.model # deep copy 
+        if train:
+            try_ = 0
+            for epoch in range(self.max_epoch):
+                try_ +=1
+                self.train(epoch)
+                loss = self.valid(epoch)
+                if loss < min_loss:
+                    try_ =0
+                    min_loss = loss
+                    best_model = self.model # deep copy 
 
-            if try_ > self.patient:
-                logger.info(f"Early stop in Epoch {epoch}")
-                break
+                if try_ > self.patient:
+                    self.logger.info(f"Early stop in Epoch {epoch}")
+                    break
 
-        self.model = best_model
-        if save == True:
-            torch.save(self.model.state_dict(), f"model/{self.save_prefix}/epoch_{epoch}_loss_{min_loss:.4f}.pt")
-            # torch.save(optimizer.state_dict(), f"model/optimizer/{self.save_prefix}/epoch_{epoch}_loss_{min_loss:.4f}.pt")
+            self.model = best_model
+            if save == True:
+                torch.save(self.model.state_dict(), f"model/{self.save_prefix}/epoch_{epoch}_loss_{min_loss:.4f}.pt")
+                # torch.save(optimizer.state_dict(), f"model/optimizer/{self.save_prefix}/epoch_{epoch}_loss_{min_loss:.4f}.pt")
+        
+        else:
+            self.model = self.load_trained(self.model, model_path)
+            self.logger.info(f"Load the model {model_path}")
+        
         if test == True:
             if self.belief_type:
-                gold, pred = self.belief_test(epoch)
+                gold, pred = self.belief_test() 
             else :
-                gold, pred = self.test(epoch)
+                gold, pred = self.test()
 
             test_score = self.evaluate_fnc(gold, pred)
+            self.logger.info(f"Test score : {test_score}")
             return test_score
 
     def set_model(self,model):
@@ -72,7 +84,7 @@ class mwozTrainer:
         return self.model 
 
     def init_model(self, base_model):
-        self.model = T5ForConditionalGeneration.from_pretrained(base_model, return_dict=True)
+        self.model = AutoModel.from_pretrained(base_model, return_dict=True)
 
     def make_label(self, data):
         generated_label = {}
@@ -162,7 +174,18 @@ class mwozTrainer:
         return  loss_sum/iter
 
 
-    def test(self,epoch_num):
+    def load_trained(self, model, model_path):
+        state_dict = torch.load(model_path)
+        new_state_dict = OrderedDict()
+        for k, v in state_dict.items():
+            # name = k.replace("module.","") # [7:]remove 'module.' of DataParallel/DistributedDataParallel
+            new_state_dict[k] = v
+        model.load_state_dict(new_state_dict)
+        return model
+    
+
+
+    def test(self):
         answer, pred = [], []
         test_max_iter = int(len(self.test_data) / self.test_batch_size)
         test_loader = torch.utils.data.DataLoader(dataset=self.test_data, batch_size=self.test_batch_size,\
@@ -184,7 +207,7 @@ class mwozTrainer:
 
 
 
-    def belief_test(self,epoch_num):
+    def belief_test(self):
         test_max_iter = int(len(self.test_data) / self.test_batch_size)
         test_loader = torch.utils.data.DataLoader(dataset=self.test_data, batch_size=self.test_batch_size,\
             collate_fn=self.test_data.collate_fn)
