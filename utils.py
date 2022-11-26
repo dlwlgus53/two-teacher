@@ -11,7 +11,7 @@ def filter_data(data, filter):
     left = 0 
     filtered = {}
     for key in data.keys():
-        if filter[key] == 'True':
+        if filter[key] == 'true':
             left +=1
             filtered[key] = data[key]
     return filtered

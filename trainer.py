@@ -109,9 +109,7 @@ class mwozTrainer:
 
                 if (iter + 1) % 50 == 0:
                     self.logger.info(f"Labeling : {iter+1}/{max_iter}")
-
-        return  generated_label # format? {key : value is ok}
-
+        return  generated_label 
         
     def train(self,epoch_num):
         train_max_iter = int(len(self.train_data) / self.train_batch_size)

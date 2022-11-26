@@ -224,8 +224,8 @@ if __name__ =="__main__":
 
     teacher_trainer.work(train_data = labeled_dataset,  test = True, save = True, \
         train =False, model_path = args.teacher_model_path) 
-    V_teacher_trainer.work(train_data = V_train_dataset, test = True, save = True) 
-
+    V_teacher_trainer.work(train_data = V_train_dataset, test = True, save = True ,\
+        train = False, model_path = args.V_teacher_model_path) 
 
     for i in range(args.max_epoch):
         made_label = teacher_trainer.make_label(data = unlabeled_dataset)
@@ -233,24 +233,22 @@ if __name__ =="__main__":
         V_pseudo_dataset = VerifyData(tokenizer, temp_dataset, 'test')
 
         TFresult = V_teacher_trainer.make_label(data = V_pseudo_dataset)
-        verified_result = filter_data(made_label, TFresult) #output : label_key
+        verified_result = filter_data(made_label, TFresult) #output : label_key - value
         logger.info (f"From {len(made_label)}, {len(verified_result)} is left")
 
 
         labeled_dataset.update(args.unlabeled_data_path, verified_result)
         V_train_dataset.update(args.unlabeled_data_path, verified_result) # TODO
 
-        test_score =  student_trainer.work(train_data = labeled_dataset, test = True, save = True)
-        teacher_trainer.work(train_data = labeled_dataset,  test = True) 
+        student_trainer.work(train_data = labeled_dataset, test = True, save = True)
+        V_student_trainer.work(train_data = V_train_dataset, test = True, )
 
-        V_student_trainer.work(train_data = V_train_dataset)
-
-        logger.info(test_score)
 
         teacher_trainer.set_model(student_trainer.get_model())
         V_teacher_trainer.set_model(V_student_trainer.get_model())
 
         student_trainer.init_model(args.base_trained) # 이렇게 해도 업데이트가 잘 될까?
         V_teacher_trainer.init_model(args.base_trained)
+        
         labeled_dataset.reverse_update()
         V_train_dataset.reverse_update()
