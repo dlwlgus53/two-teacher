@@ -61,11 +61,7 @@ class mwozTrainer:
             self.model = best_model
             if save == True:
                 torch.save(self.model.state_dict(), f"model/{self.save_prefix}/epoch_{epoch}_loss_{min_loss:.4f}.pt")
-                # torch.save(optimizer.state_dict(), f"model/optimizer/{self.save_prefix}/epoch_{epoch}_loss_{min_loss:.4f}.pt")
-        
-        else:
-            self.model = self.load_trained(self.model, model_path)
-            self.logger.info(f"Load the model {model_path}")
+
         
         if test == True:
             if self.belief_type:
@@ -137,10 +133,10 @@ class mwozTrainer:
                 loss_sum =0 
 
                 if (iter+1) % 150 ==0:
-                    answer_text = self.tokenizer.batch_decode(outputs_text, skip_special_tokens = True)
-                    predict_text = self.tokenizer.batch_decode(batch['label']['input_ids'], skip_special_tokens = True)
+                    predict_text = self.tokenizer.batch_decode(outputs_text, skip_special_tokens = True)
+                    answer_text = self.tokenizer.batch_decode(batch['label']['input_ids'], skip_special_tokens = True)
                     p_a_text = [f'ans : {a} pred : {p} || ' for (a,p) in zip(answer_text, predict_text)]
-
+                    self.logger.info(p_a_text)
                     self.writer.add_text(f'Answer/train_epoch{epoch_num}',\
                     '\n'.join(p_a_text),iter)
 
@@ -172,14 +168,6 @@ class mwozTrainer:
         return  loss_sum/iter
 
 
-    def load_trained(self, model, model_path):
-        state_dict = torch.load(model_path)
-        new_state_dict = OrderedDict()
-        for k, v in state_dict.items():
-            # name = k.replace("module.","") # [7:]remove 'module.' of DataParallel/DistributedDataParallel
-            new_state_dict[k] = v
-        model.load_state_dict(new_state_dict)
-        return model
     
 
 
