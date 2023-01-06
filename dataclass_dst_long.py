@@ -21,16 +21,16 @@ class DSTMultiWozData:
         self.raw_dataset = json.load(open(data_path , "r"))
         self.short = short
 
-        turn_id, dial_id,  question,  answer, dial_text = self.seperate_data(self.raw_dataset)
+        turn_id, dial_id,  question, schema, answer, dial_text = self.seperate_data(self.raw_dataset)
 
         assert len(turn_id) == len(dial_id) == len(question)\
-            == len(answer) == len(dial_text)
-        print(f'data number {data_type}, : {len(turn_id)}')        
-        
+            == len(schema) == len(answer) == len(dial_text)
+            
         self.target = answer
         self.turn_id = turn_id
         self.dial_id = dial_id
         self.question = question
+        self.schema = schema
         self.dial_text = dial_text
 
     def __len__(self):
@@ -42,6 +42,7 @@ class DSTMultiWozData:
     def seperate_data(self, dataset):
         question = []
         answer = []
+        schema = []
         dial_id = []
         turn_id = []
         context = []
@@ -49,28 +50,33 @@ class DSTMultiWozData:
         S = 0
         for d_id in dataset.keys():
             S +=1
-            if self.short == True and S > 300:
+            if self.short == True and S > 500:
                 break
             dialogue = dataset[d_id]['log']
             turn_text = ""
             for t_id, turn in enumerate(dialogue):
                 turn_text += cfg.USER_tk
                 turn_text += turn['user']
-                q = "What is dialgoue state? "
-                belief_state = str(turn['belief'])
-                belief_state = belief_state.replace("'","").replace("{","").replace("}","")
-                a= belief_state
+                for key_idx, key in enumerate(ontology.QA['all-domain']): # TODO
+                    q = f"Find value. Slot is {key}" # Make model simple
+                    label_key = make_label_key(d_id, t_id, key)
+                    if key in turn['belief']: 
+                        a = turn['belief'][key]
+                        if isinstance(a, list) : a= a[0] # in muptiple type, a == ['sunday',6]
+                    else:
+                        a = ontology.QA['NOT_MENTIONED']
 
-                answer.append(a)
-                question.append(q)
-                dial_id.append(d_id)
-                turn_id.append(t_id)
-                dial_text.append(turn_text)
-                
+                    schema.append(key)
+                    answer.append(a)
+                    question.append(q)
+                    dial_id.append(d_id)
+                    turn_id.append(t_id)
+                    dial_text.append(turn_text)
+
                 turn_text += cfg.SYSTEM_tk
                 turn_text += turn['response']
 
-        return turn_id, dial_id, question,  answer, dial_text
+        return turn_id, dial_id, question, schema, answer, dial_text
 
 
     def encode(self, texts ,return_tensors="pt"):
@@ -94,9 +100,10 @@ class DSTMultiWozData:
         turn_id = self.turn_id[index]
         dial_id = self.dial_id[index]
         question = self.question[index]
+        schema = self.schema[index]
         dial_text = self.dial_text[index]
         return {"target": target,"turn_id" : turn_id,"question" : question, "dial_text" : dial_text,\
-            "dial_id" : dial_id,  }
+            "dial_id" : dial_id, "schema":schema }
 
     def collate_fn(self, batch):
         """
@@ -107,6 +114,7 @@ class DSTMultiWozData:
         dial_id = [x["dial_id"] for x in batch]
         turn_id = [x["turn_id"] for x in batch]
         question = [x["question"] for x in batch]
+        schema = [x["schema"] for x in batch]
         target = [x["target"] for x in batch]
         dial_text = [x["dial_text"] for x in batch]
 
@@ -120,7 +128,7 @@ class DSTMultiWozData:
         padding=True, return_tensors='pt', truncation = True)
         
         return {"input": source, "label": target,\
-                 "dial_id":dial_id, "turn_id":turn_id}
+                 "schema":schema, "dial_id":dial_id, "turn_id":turn_id}
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -140,7 +148,7 @@ if __name__ == '__main__':
     t = dataset.tokenizer
     for batch in data_loader:
         for i in range(3):
-            print(t.decode(batch['input']['input_ids'][i], skip_special_tokens = True))
-            print(t.decode(batch['label']['input_ids'][i], skip_special_tokens = True))
+            print(t.decode(batch['input']['input_ids'][i]))
+            print(t.decode(batch['label']['input_ids'][i]))
             print()
         pdb.set_trace()    

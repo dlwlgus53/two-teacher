@@ -135,8 +135,9 @@ class mwozTrainer:
                 if (iter+1) % 150 ==0:
                     predict_text = self.tokenizer.batch_decode(outputs_text, skip_special_tokens = True)
                     answer_text = self.tokenizer.batch_decode(batch['label']['input_ids'], skip_special_tokens = True)
-                    p_a_text = [f'ans : {a} pred : {p} || ' for (a,p) in zip(answer_text, predict_text)]
-                    self.logger.info(p_a_text)
+                    p_a_text = [f'ans : {a} pred : {p} ||' for (a,p) in zip(answer_text[:2], predict_text[:2])]
+                    self.logger.info(f'ans : {answer_text[0]}')
+                    self.logger.info(f'pre : {predict_text[0]}')
                     self.writer.add_text(f'Answer/train_epoch{epoch_num}',\
                     '\n'.join(p_a_text),iter)
 
@@ -192,6 +193,16 @@ class mwozTrainer:
     
 
 
+    def string_to_dict(slef, belief_str):
+        belief_dict = {}
+        items = belief_str.split(",")
+        for item in items:
+            try:
+                key,value = item.split(": ")
+                belief_dict[key.strip()] = value.strip()
+            except ValueError:
+                continue
+        return belief_dict
 
     def belief_test(self):
         test_max_iter = int(len(self.test_data) / self.test_batch_size)
@@ -206,24 +217,13 @@ class mwozTrainer:
             for iter,batch in enumerate(test_loader):
                 outputs_text = self.model.module.generate(input_ids=batch['input']['input_ids'].to('cuda'))
                 outputs_text =self.tokenizer.batch_decode(outputs_text, skip_special_tokens = True)
-                
                 for idx in range(len(outputs_text)):
                     dial_id = batch['dial_id'][idx]
                     turn_id = batch['turn_id'][idx]
-                    schema = batch['schema'][idx]
-                    if turn_id not in belief_state[dial_id].keys():
-                        belief_state[dial_id][turn_id] = {}
-                    if outputs_text[idx] == ontology.QA['NOT_MENTIONED'] : continue
-                    else: belief_state[dial_id][turn_id][schema] = outputs_text[idx]
-
+                    belief_state[dial_id][turn_id]= self.string_to_dict(outputs_text[idx])
                 if (iter + 1) % 50 == 0:
                     self.logger.info(f"Test : {iter+1}/{test_max_iter}")
-            
-            with open(os.path.join(self.log_folder, 'pred_belief.json'), 'w') as fp:
-                json.dump(belief_state, fp, indent=4, ensure_ascii=False)
-        
         answer = self.test_data.get_data()
-
         return answer, belief_state
     
 

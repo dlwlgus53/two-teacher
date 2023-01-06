@@ -23,8 +23,12 @@ class DSTMultiWozAugData:
         self.max_length = tokenizer.model_max_length
         self.raw_dataset = json.load(open(data_path , "r"))
         self.value_dict = self.make_value_dict(self.raw_dataset)
-        turn_id, dial_id,  question, answer, = self.seperate_data(self.raw_dataset)
-        assert len(turn_id) == len(dial_id) == len(question) == len(answer)
+        if data_type == 'aug':
+            turn_id, dial_id,  question, answer, = self.seperate_data_aug(self.raw_dataset)
+            assert len(turn_id) == len(dial_id) == len(question) == len(answer)
+        else: 
+            turn_id, dial_id,  question, answer, = self.seperate_data(self.raw_dataset)
+            assert len(turn_id) == len(dial_id) == len(question) == len(answer)
         self.target = answer
         self.turn_id = turn_id
         self.dial_id = dial_id
@@ -42,19 +46,61 @@ class DSTMultiWozAugData:
                     if key in turn['belief']: 
                         belief_answer = turn['belief'][key]
                         if isinstance(belief_answer, list) : belief_answer= belief_answer[0] # in muptiple type, a == ['sunday',6]
-                    else:
-                        belief_answer = ontology.QA['NOT_MENTIONED']
-                    
-                    values[key].append(belief_answer)
-                    values[key] = list(set(values[key]))
-        values['restaurant-time'].remove('11:30 | 12:30')
-        values['hotel-pricerange'].remove('cheap|moderate')
+                        values[key].append(belief_answer)
+                        values[key] = list(set(values[key]))
+
+        try:
+            values['restaurant-time'].remove('11:30 | 12:30')
+        except ValueError:
+            pass
+        try:
+            values['hotel-pricerange'].remove('cheap|moderate')
+        except ValueError:
+            pass
         return values
 
     def get_data(self):
         return self.raw_dataset
-    def aug_dst(self,dst):
-        return [dst,dst,dst,dst]
+
+
+    def aug_dst(self,dst): # TODO 현재 turn의 belief state만 중심적으로 봐야한다.
+
+        value_dict = self.value_dict
+        def add(dst, value_dict):
+            try:
+                domain = random.choice(list(dst.keys())).split("-")[0]
+                slot = random.choice([item for item in value_dict.keys() if item.startswith(domain) and item not in dst.keys()])
+                value = random.choice(value_dict[slot])
+                dst[slot] = value
+            except IndexError as e:
+                dst = dst
+
+            return dst
+
+        def delete(dst):
+            try:
+                slot = random.choice(list(dst.keys()))
+                del dst[slot]
+            except IndexError as e:
+                dst = None
+            return dst
+
+        def replace(dst, value_dict):
+            try:
+                slot = random.choice(list(dst.keys()))
+                choices = value_dict[slot].copy()
+                choices.remove(dst[slot])
+                value = random.choice(choices)
+                dst[slot] = value
+            except IndexError as e:
+                dst = None
+            return dst
+        
+        result = [dst, add(dst.copy(), value_dict), delete(dst.copy()), replace(dst.copy(), value_dict)]
+        result = [i for i in  result if i is not None]
+
+        return result
+    
     def seperate_data(self, dataset):
         question = []
         answer = []
@@ -64,21 +110,73 @@ class DSTMultiWozAugData:
         S = 0
         for d_id in dataset.keys():
             S +=1
-            if self.short == True and S > 10:
+            if self.short == True and S > 1000:
                 break
             dialogue = dataset[d_id]['log']
             system = "" # should be changed
             for t_id, turn in enumerate(dialogue):
-                dsts = self.aug_dst(turn['belief'])
-                for dst in dsts:
-                    q = f"make dialgoue. DST {dst} System : {system}"
+                dst = turn['belief']
+                # find curr_dst
+                if t_id == 0:
+                    curr_dst = dst
+                else:
+                    dst_set = set(dst.items())
+                    prev_dst_set = set(prev_dst.items())
+                    curr_dst = dict(dst_set - prev_dst_set)
+
+                curr_dst_str = str(curr_dst)
+                curr_dst_str = curr_dst_str.replace("{","").replace("}","").replace(": ", ' is ').replace("'","")
+                q = f"make dialgoue. DST {curr_dst_str} System : {system}"
+
+                question.append(q)
+                answer.append(turn['user']) # should be change
+                dial_id.append(d_id)
+                turn_id.append(t_id)
+
+                system = turn['response'] 
+                prev_dst = turn['belief']
+
+        return turn_id, dial_id,  question,  answer
+
+
+    def seperate_data_aug(self, dataset):
+        question = []
+        answer = []
+        dial_id = []
+        turn_id = []
+        context = []
+        S = 0
+        for d_id in dataset.keys():
+            S +=1
+            if self.short == True and S > 300:
+                break
+            dialogue = dataset[d_id]['log']
+            system = ""
+            for t_id, turn in enumerate(dialogue):
+                dst = turn['belief']
+
+                # find curr_dst
+                if t_id == 0:
+                    curr_dst = dst
+                else:
+                    dst_set = set(dst.items())
+                    prev_dst_set = set(prev_dst.items())
+                    curr_dst = dict(dst_set - prev_dst_set)
+
+                curr_dsts = self.aug_dst(curr_dst)
+
+                for curr_dst_aug in curr_dsts:
+                    curr_dst_aug_str = str(curr_dst_aug)
+                    curr_dst_aug_str = curr_dst_aug_str.replace("{","").replace("}","").replace(": ", ' is ').replace("'","")
+                    q = f"make dialgoue. DST {curr_dst_aug_str} System : {system}"
 
                     question.append(q)
-                    answer.append(turn['user']) # should be change
+                    answer.append("_") # should be change
                     dial_id.append(d_id)
                     turn_id.append(t_id)
 
                 system = turn['response'] 
+                prev_dst = turn['belief']
 
         return turn_id, dial_id,  question,  answer
 
@@ -114,15 +212,12 @@ class DSTMultiWozAugData:
         The tensors are stacked together as they are yielded.
         Collate function is applied to the output of a DataLoader as it is yielded.
         """
-
-
         dial_id = [x["dial_id"] for x in batch]
         turn_id = [x["turn_id"] for x in batch]
         question = [x["question"] for x in batch]
         target = [x["target"] for x in batch]
 
-
-        input_source = [f"{q}" for q in zip(question)]
+        input_source = question
         source = self.encode(input_source)
         source = [{k:v.squeeze() for (k,v) in s.items()} for s in source]
         source = self.tokenizer.pad(source,padding=True)
@@ -146,14 +241,14 @@ if __name__ == '__main__':
     args = parser.parse_args()
     tokenizer = AutoTokenizer.from_pretrained(args.base_trained)
 
-    dataset = DSTMultiWozAugData(tokenizer,args.labeled_data_path, data_type = 'train', short = 1)
+    dataset = DSTMultiWozAugData(tokenizer,args.labeled_data_path, data_type = 'aug', short = 1)
 
     data_loader = torch.utils.data.DataLoader(dataset=dataset, batch_size=16, collate_fn=dataset.collate_fn)
     t = dataset.tokenizer
     for batch in data_loader:
         for i in range(3):
-            print(t.decode(batch['input']['input_ids'][i]))
-            print(t.decode(batch['label']['input_ids'][i]))
+            print(t.decode(batch['input']['input_ids'][i], skip_special_tokens = True))
+            print(t.decode(batch['label']['input_ids'][i], skip_special_tokens = True))
             print()
         pdb.set_trace()
     

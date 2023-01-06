@@ -11,8 +11,34 @@ from sklearn.metrics import accuracy_score
 def acc_metric(gold, pred):
     return accuracy_score(gold, pred)
 
+
 def jga_metric(raw_file, all_prediction):
-    # domain, schema accuracy 는 틀린부분이 있어서 return 하지 않음.
+    joint_acc, turn_acc, turn_cnt  = 0, 0, 0
+
+    for key in raw_file.keys():
+        if key not in all_prediction.keys(): continue
+        dial = raw_file[key]['log']
+        for turn_idx, turn in enumerate(dial):
+            try:
+                raw_belief_label = turn['belief']
+                raw_belief_pred = all_prediction[key][turn_idx]
+                # if turn_idx != 0:
+                    # raw_belief_pred  = dict(all_prediction[key][turn_idx-1], **all_prediction[key][turn_idx])
+            except:
+                pdb.set_trace()
+            belief_label = [f'{k} : {str(v)}' for (k,v) in raw_belief_label.items()] 
+            belief_pred = [f'{k} : {str(v)}' for (k,v) in raw_belief_pred.items()] 
+
+            if set(belief_label) == set(belief_pred):
+                joint_acc += 1
+            turn_cnt +=1
+    
+    return joint_acc/turn_cnt, turn_acc/turn_cnt, 
+
+
+
+def jga_metric_long(raw_file, all_prediction):
+    pdb.set_trace()
     
     schema = ontology.QA['all-domain'] # next response 는 제외
     turn_acc, joint_acc, micro_f1, unseen_recall, turn_cnt, usr_cnt = 0, 0, 0, 0, 0,0
@@ -22,7 +48,7 @@ def jga_metric(raw_file, all_prediction):
         dial = raw_file[key]['log']
         for turn_idx, turn in enumerate(dial):
             try:
-                raw_belief_label = turn['belief']
+                raw_belief_label = turn['curr_belief']
                 if type(list(all_prediction[key].keys())[0]) is str:
                     raw_belief_pred = all_prediction[key][str(turn_idx)]
                 else:   
@@ -31,7 +57,6 @@ def jga_metric(raw_file, all_prediction):
                 pdb.set_trace()
             belief_label = [f'{k} : {v}' for (k,v) in raw_belief_label.items()] 
             belief_pred = [f'{k} : {v}' for (k,v) in raw_belief_pred.items()] 
-
 
 
             if set(belief_label) == set(belief_pred):

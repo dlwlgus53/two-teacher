@@ -13,13 +13,11 @@ import torch.nn.functional as F
 
 from transformers import T5Tokenizer, T5ForConditionalGeneration,Adafactor
 from transformers.optimization import AdamW, get_linear_schedule_with_warmup
-from trainer import mwozTrainer
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
-from dataclass_ver import VerifyData
+from dataclass_aug import DSTMultiWozAugData
 from utils import filter_data, merge_data
-from evaluate import acc_metric
 
 parser = argparse.ArgumentParser()
 
@@ -92,9 +90,9 @@ if __name__ =="__main__":
     teacher = nn.DataParallel(teacher).cuda()
     tokenizer = T5Tokenizer.from_pretrained(args.base_trained)
 
-    labeled_dataset = VerifyData(tokenizer, args.labeled_data_path, 'train' , short = args.short) 
-    valid_dataset = VerifyData(tokenizer,  args.valid_data_path, 'valid' , short = args.short)
-    test_dataset = VerifyData(tokenizer,  args.test_data_path, 'test' , short = args.short)
+    labeled_dataset = DSTMultiWozAugData(tokenizer, args.labeled_data_path, 'train' , short = args.short) 
+    valid_dataset = DSTMultiWozAugData(tokenizer,  args.valid_data_path, 'valid' , short = args.short)
+    test_dataset = DSTMultiWozAugData(tokenizer,  args.test_data_path, 'test' , short = args.short)
 
     optimizer_setting = {
         'warmup_init':False,
@@ -123,10 +121,10 @@ if __name__ =="__main__":
         valid_data = valid_dataset,
         test_data = test_dataset,
         optimizer = teacher_optimizer,
-        logger_name = 'teacher',
-        evaluate_fnc = acc_metric, 
+        logger_name = 'teacher_aug',
+        evaluate_fnc = None, 
         belief_type = False,
         **trainer_setting)
 
-    teacher_trainer.work(train_data = labeled_dataset,  test = True, save = True, train =True) 
+    teacher_trainer.work(train_data = labeled_dataset,  test = False, save = True, train =True) 
     
