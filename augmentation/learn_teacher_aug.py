@@ -7,6 +7,7 @@ import random
 import argparse
 from collections import OrderedDict
 from logger_conf import CreateLogger
+from trainer import mwozTrainer
 
 import torch.nn as nn
 import torch.nn.functional as F

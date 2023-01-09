@@ -99,7 +99,8 @@ class mwozTrainer:
                 for idx in range(len(outputs_text)):
                     dial_id = batch['dial_id'][idx]
                     turn_id = batch['turn_id'][idx]
-                    label_key = make_label_key(dial_id, turn_id)
+                    slot = batch['schema'][idx]
+                    label_key = make_label_key(dial_id, turn_id, slot)
                     generated_label[label_key] = outputs_text[idx]
 
                 if (iter + 1) % 50 == 0:
@@ -131,11 +132,15 @@ class mwozTrainer:
                 self.writer.add_scalar(f'Loss/train_epoch{epoch_num} ', loss_sum/50, iter)
                 loss_sum =0 
 
-                if (iter+1) % 150 ==0:
+                if (iter+1) % 50 ==0:
+                    question_text = self.tokenizer.batch_decode(batch['input']['input_ids'], skip_special_tokens = True)
                     predict_text = self.tokenizer.batch_decode(outputs_text, skip_special_tokens = True)
                     answer_text = self.tokenizer.batch_decode(batch['label']['input_ids'], skip_special_tokens = True)
                     p_a_text = [f'ans : {a} pred : {p} ||' for (a,p) in zip(answer_text[:10], predict_text[:10])]
-                    self.logger.info(f'{p_a_text}')
+                    self.logger.info(question_text[0])
+                    self.logger.info(answer_text[0])
+                    self.logger.info(predict_text[0])
+
                     self.writer.add_text(f'Answer/train_epoch{epoch_num}',\
                     '\n'.join(p_a_text),iter)
 

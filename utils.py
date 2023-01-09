@@ -3,9 +3,12 @@ import ontology
 import json, os
 import pdb
 
-
+'''
 def make_label_key(dial_id, turn_id, slot):
     return f'[d]{dial_id}[t]{turn_id}[s]{slot}'
+'''
+def make_label_key(dial_id, turn_id):
+    return f'[d]{dial_id}[t]{turn_id}'
 
 def filter_data(data, filter):
     left = 0 

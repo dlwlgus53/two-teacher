@@ -39,9 +39,9 @@ class DSTMultiWozAugData:
     
     def make_value_dict(self, dataset):
         values = defaultdict(list)
-        for d_id in dataset.keys():
-            dialogue = dataset[d_id]['log']
-            for t_id, turn in enumerate(dialogue):
+        for dial in dataset:
+
+            for t_id, turn in enumerate(dial):
                 for key_idx, key in enumerate(ontology.QA['all-domain']): # TODO
                     if key in turn['belief']: 
                         belief_answer = turn['belief'][key]
@@ -89,53 +89,61 @@ class DSTMultiWozAugData:
             try:
                 slot = random.choice(list(dst.keys()))
                 choices = value_dict[slot].copy()
-                choices.remove(dst[slot])
+                if dst[slot] == '11:30 | 12:30' or dst[slot] == 'cheap|moderate':
+                    pass
+                else:
+                    choices.remove(dst[slot])
+                
                 value = random.choice(choices)
                 dst[slot] = value
             except IndexError as e:
                 dst = None
+            except:
+                pdb.set_trace()
             return dst
         
         result = [dst, add(dst.copy(), value_dict), delete(dst.copy()), replace(dst.copy(), value_dict)]
         result = [i for i in  result if i is not None]
 
         return result
-    
+    def remove_unuse_domain(self,dst):
+        new_dst = {}
+        for key in dst:
+            if key in ontology.QA['all-domain']:
+                new_dst[key] = dst[key]
+        return new_dst
     def seperate_data(self, dataset):
         question = []
         answer = []
         dial_id = []
         turn_id = []
         context = []
+        dial_num = 0
         S = 0
-        for d_id in dataset.keys():
+        for dial in dataset:
             S +=1
             if self.short == True and S > 1000:
                 break
-            dialogue = dataset[d_id]['log']
+            d_id = dial[0]['dial_id']
             system = "" # should be changed
-            for t_id, turn in enumerate(dialogue):
-                dst = turn['belief']
-                # find curr_dst
-                if t_id == 0:
-                    curr_dst = dst
-                else:
-                    dst_set = set(dst.items())
-                    prev_dst_set = set(prev_dst.items())
-                    curr_dst = dict(dst_set - prev_dst_set)
-
+            dial_num +=1
+            for t_id, turn in enumerate(dial):
+                turn['curr_belief'] =self.remove_unuse_domain(turn['curr_belief'])
+                if len(turn['curr_belief']) == 0 :continue
+                curr_dst = turn['curr_belief']
                 curr_dst_str = str(curr_dst)
                 curr_dst_str = curr_dst_str.replace("{","").replace("}","").replace(": ", ' is ').replace("'","")
-                q = f"make dialgoue. DST {curr_dst_str} System : {system}"
+                q = f"make dialgoue. DST : {curr_dst_str} System : {system}"
 
                 question.append(q)
-                answer.append(turn['user']) # should be change
+                answer.append(turn['user'].replace("<eos_u>","").replace("<sos_u>","") ) # should be change
                 dial_id.append(d_id)
                 turn_id.append(t_id)
 
-                system = turn['response'] 
+                system = turn['resp'].replace("<eos_r>","").replace("<sos_r>","") 
                 prev_dst = turn['belief']
 
+        print(f"total dial num is {dial_num}")
         return turn_id, dial_id,  question,  answer
 
 
@@ -145,39 +153,37 @@ class DSTMultiWozAugData:
         dial_id = []
         turn_id = []
         context = []
+        dial_num  = 0
         S = 0
-        for d_id in dataset.keys():
+        for dial in dataset:
             S +=1
             if self.short == True and S > 300:
                 break
-            dialogue = dataset[d_id]['log']
+            d_id = dial[0]['dial_id']
             system = ""
-            for t_id, turn in enumerate(dialogue):
-                dst = turn['belief']
+            dial_num +=1
 
-                # find curr_dst
-                if t_id == 0:
-                    curr_dst = dst
-                else:
-                    dst_set = set(dst.items())
-                    prev_dst_set = set(prev_dst.items())
-                    curr_dst = dict(dst_set - prev_dst_set)
+            for t_id, turn in enumerate(dial):
 
+                turn['curr_belief'] =self.remove_unuse_domain(turn['curr_belief'])
+                curr_dst = turn['curr_belief']
                 curr_dsts = self.aug_dst(curr_dst)
 
                 for curr_dst_aug in curr_dsts:
                     curr_dst_aug_str = str(curr_dst_aug)
                     curr_dst_aug_str = curr_dst_aug_str.replace("{","").replace("}","").replace(": ", ' is ').replace("'","")
-                    q = f"make dialgoue. DST {curr_dst_aug_str} System : {system}"
+                    q = f"make dialgoue. DST : {curr_dst_aug_str} System : {system}"
+
 
                     question.append(q)
                     answer.append("_") # should be change
                     dial_id.append(d_id)
                     turn_id.append(t_id)
 
-                system = turn['response'] 
+                system = turn['resp'].replace("<eos_r>","").replace("<sos_r>","") 
                 prev_dst = turn['belief']
 
+        print(f"total dial num is {dial_num}")
         return turn_id, dial_id,  question,  answer
 
 
@@ -233,15 +239,17 @@ class DSTMultiWozAugData:
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--model_name', type = str, default = 't5-base')
-    parser.add_argument('--labeled_data_path' , type = str, default='../woz-data/MultiWOZ_2.1/labeled/0.1/labeled_1.json')
     parser.add_argument('--base_trained', type = str, default = "t5-base", help =" pretrainned model from 🤗")
+    parser.add_argument('--labeled_data_path' , type = str, default= '/home/jihyunlee/pptod/data/multiwoz/data/labeled/0.1/labeled_1.json')
+    parser.add_argument('--test_data_path' , type = str, default= '/home/jihyunlee/pptod/data/multiwoz/data/multi-woz-fine-processed/multiwoz-fine-processed-test.json')
 
 
     # /home/jihyunlee/woz-data/MultiWOZ_2.1/split0.01/labeled.json
     args = parser.parse_args()
     tokenizer = AutoTokenizer.from_pretrained(args.base_trained)
 
-    dataset = DSTMultiWozAugData(tokenizer,args.labeled_data_path, data_type = 'aug', short = 1)
+    dataset = DSTMultiWozAugData(tokenizer,args.labeled_data_path, data_type = 'train', short = 1)
+    dataset = DSTMultiWozAugData(tokenizer,args.labeled_data_path, data_type = 'train', short = 1)
 
     data_loader = torch.utils.data.DataLoader(dataset=dataset, batch_size=16, collate_fn=dataset.collate_fn)
     t = dataset.tokenizer

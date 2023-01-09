@@ -13,97 +13,157 @@ import argparse
 from transformers import  AutoTokenizer
 import config as cfg
 from utils import make_label_key, dictionary_split
+from collections import defaultdict
 
 
 
+all_sos_token_list = ['<sos_b>', '<sos_a>', '<sos_r>']
+all_eos_token_list = ['<eos_b>', '<eos_a>', '<eos_r>']
 class VerifyData:
-    def __init__(self, tokenizer, data_path, data_type,  short = 0):
+    def __init__(self, tokenizer, data_path, data_type,  short = 0, use_list_path = None):
         self.tokenizer = tokenizer
         self.max_length = tokenizer.model_max_length
         self.raw_dataset = json.load(open(data_path , "r"))
-        self.value_list = self.make_value_list(self.raw_dataset)
         self.data_type = data_type
         self.short = short
+        if use_list_path:
+            use_list = json.load(open(use_list_path , "r"))
+        else:
+            use_list = None
 
-        dial_id, turn_id, schema, question, answer = self.seperate_data(self.raw_dataset)
+        dial_id, turn_id, question, answer = self.seperate_data(self.raw_dataset, use_list)
         assert len(question) == len(answer)
 
         self.target = answer
         self.turn_id = turn_id
         self.dial_id = dial_id
         self.question = question
-        self.schema = schema
 
     def __len__(self):
         return len(self.question)
 
-    def make_value_list(self, dataset):
-        values = []
-        for d_id in dataset.keys():
-            dialogue = dataset[d_id]['log']
-            for t_id, turn in enumerate(dialogue):
+    def remove_unuse_domain(self,dst):
+        new_dst = {}
+        for key in dst:
+            if key in ontology.QA['all-domain']:
+                new_dst[key] = dst[key]
+        return new_dst
+
+    def make_value_dict(self, dataset):
+        values = defaultdict(list)
+        for dial in dataset:
+            for t_id, turn in enumerate(dial):
+                if 'belief' not in turn:
+                        print(f"no belief {turn['dial_id']} {t_id}")
+                        continue
                 for key_idx, key in enumerate(ontology.QA['all-domain']): # TODO
+                    
                     if key in turn['belief']: 
                         belief_answer = turn['belief'][key]
                         if isinstance(belief_answer, list) : belief_answer= belief_answer[0] # in muptiple type, a == ['sunday',6]
-                    else:
-                        belief_answer = ontology.QA['NOT_MENTIONED']
+                        values[key].append(belief_answer)
+                        values[key] = list(set(values[key]))
 
-                    values.append(belief_answer)
+        try:
+            values['restaurant-time'].remove('11:30 | 12:30')
+        except ValueError:
+            pass
+        try:
+            values['hotel-pricerange'].remove('cheap|moderate')
+        except ValueError:
+            pass
+        return values
+
+    def aug_dst(self,dst, value_dict): # TODO 현재 turn의 belief state만 중심적으로 봐야한다.
+
+        def add(dst, value_dict):
+            try:
+                domain = random.choice(list(dst.keys())).split("-")[0]
+                slot = random.choice([item for item in value_dict.keys() if item.startswith(domain) and item not in dst.keys()])
+                value = random.choice(value_dict[slot])
+                dst[slot] = value
+            except IndexError as e:
+                dst = dst
+
+            return dst
+
+        def delete(dst):
+            try:
+                slot = random.choice(list(dst.keys()))
+                del dst[slot]
+            except IndexError as e:
+                dst = None
+            return dst
+
+        def replace(dst, value_dict):
+            try:
+                slot = random.choice(list(dst.keys()))
+                choices = value_dict[slot].copy()
+                if dst[slot] == '11:30 | 12:30' or dst[slot] == 'cheap|moderate':
+                    pass
+                else:
+                    choices.remove(dst[slot])
+                
+                value = random.choice(choices)
+                dst[slot] = value
+            except IndexError as e:
+                dst = None
+            except:
+                pdb.set_trace()
+            return dst
         
-        return list(set(values))
-                    
+        result = [add(dst.copy(), value_dict), delete(dst.copy()), replace(dst.copy(), value_dict)]
+        result = [i for i in  result if i is not None]
 
+        return random.choice(result)
 
-    def find_different_answer(self, target):
-        return random.choice(list(set(self.value_list) - set([target])))
-
-
-    def seperate_data(self, dataset):
+    def seperate_data(self, dataset, use_list = None):
+        value_dict = self.make_value_dict(dataset)
         question = []
         answer = []
-        schema = []
         dial_id = []
         turn_id = []
+        dial_num = 0
         S = 0
-        for d_id in dataset.keys():
+        for dial in dataset:
             S +=1
-            if self.short == True and S > 500:
+            if self.short == True and S > 100:
                 break
-            dialogue = dataset[d_id]['log']
             turn_text = ""
-            for t_id, turn in enumerate(dialogue):
+            dial_num +=1
+            d_id = dial[0]['dial_id']
+            if 'belief' not in dial[0]:
+                print(f"no belief {d_id}")
+                continue
+            for t_id, turn in enumerate(dial):
                 turn_text += cfg.USER_tk
-                turn_text += turn['user']
-                for key_idx, key in enumerate(ontology.QA['all-domain']): # TODO
+                turn_text += turn['user'].replace("<eos_u>","").replace("<sos_u>","")
+                turn['belief'] =self.remove_unuse_domain(turn['belief'])
+                belief_answer =str(turn['belief']).replace("{","").replace("}","").replace("'","")
+                wrong_belief_answer = str(self.aug_dst(turn['belief'], value_dict)).replace("{","").replace("}","").replace("'","")
+                q1 = f"verify the question and answer : context : {turn_text}, Answer : {belief_answer}"
+                a1 = 'true'
 
-                    if key in turn['belief']: 
-                        belief_answer = turn['belief'][key]
-                        if isinstance(belief_answer, list) : belief_answer= belief_answer[0] # in muptiple type, a == ['sunday',6]
-                    else:
-                        belief_answer = ontology.QA['NOT_MENTIONED']
+                q2 = f"verify the question and answer : context : {turn_text}, Answer : {wrong_belief_answer}"
+                a2 = 'false'
 
+                question.append(q1)
+                answer.append(a1)
+                dial_id.append(d_id)
+                turn_id.append(t_id)
 
-                    q1 = f"verify QA context : {turn_text}, question : {ontology.QA[key]['description1']},Answer : {belief_answer}"
-                    a1 = 'true'
-
-                    q2 = f"verify QA context : {turn_text}, question : {ontology.QA[key]['description1']}, Answer : {self.find_different_answer(belief_answer)}"
-                    a2 = 'false'
-                    question.append(q1)
-                    answer.append(a1)
-                    schema.append(key)
+                if self.data_type != 'test':
+                    question.append(q2)
+                    answer.append(a2)
                     dial_id.append(d_id)
                     turn_id.append(t_id)
-                    if self.data_type != 'test':
-                        question.append(q2)
-                        answer.append(a2)
-                        schema.append(key)
-                        dial_id.append(d_id)
-                        turn_id.append(t_id)
-                turn_text += cfg.SYSTEM_tk
-                turn_text += turn['response']
 
-        return dial_id, turn_id, schema, question, answer 
+
+                turn_text += cfg.SYSTEM_tk
+                turn_text += turn['resp'].replace("<eos_r>","").replace("<sos_r>","")
+        
+        print(f"total dial num is {dial_num}")
+        return dial_id, turn_id, question, answer 
 
 
     def encode(self, texts ,return_tensors="pt"):
@@ -127,8 +187,7 @@ class VerifyData:
         question = self.question[index]
         turn_id = self.turn_id[index]
         dial_id = self.dial_id[index]
-        schema = self.schema[index]
-        return {"question": question, "target": target, "turn_id" : turn_id,"dial_id" : dial_id, "schema":schema }
+        return {"question": question, "target": target, "turn_id" : turn_id,"dial_id" : dial_id, }
     
 
     def collate_fn(self, batch):
@@ -140,7 +199,6 @@ class VerifyData:
         target = [x["target"] for x in batch]
         turn_id = [x["turn_id"] for x in batch]
         dial_id = [x["dial_id"] for x in batch]
-        schema = [x["schema"] for x in batch]
 
 
         source = self.encode(input_source)
@@ -150,13 +208,15 @@ class VerifyData:
         target = self.tokenizer.batch_encode_plus(target, max_length = self.max_length, \
         padding=True, return_tensors='pt', truncation = True)
 
-        return {"input": source, "label": target, "turn_id" : turn_id,"dial_id" : dial_id, "schema":schema }
+        return {"input": source, "label": target, "turn_id" : turn_id,"dial_id" : dial_id}
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--model_name', type = str, default = 't5-base')
-    parser.add_argument('--labeled_data_path' , type = str, default='../woz-data/MultiWOZ_2.1/labeled/0.1/labeled_1.json')
+    parser.add_argument('--labeled_data_path' , type = str, default= '/home/jihyunlee/pptod/data/multiwoz/data/labeled/0.1/labeled_1.json')
+    parser.add_argument('--test_data_path' , type = str, default= '/home/jihyunlee/pptod/data/multiwoz/data/multi-woz-fine-processed/multiwoz-fine-processed-test.json')
+    
     parser.add_argument('--base_trained', type = str, default = "t5-base", help =" pretrainned model from 🤗")
 
 
@@ -164,14 +224,14 @@ if __name__ == '__main__':
     args = parser.parse_args()
     tokenizer = AutoTokenizer.from_pretrained(args.base_trained)
 
-    dataset = VerifyData(tokenizer, args.labeled_data_path, 'train', short = 1) 
+    dataset = VerifyData(tokenizer, args.test_data_path, 'test', short = 1) 
 
 
     data_loader = torch.utils.data.DataLoader(dataset=dataset, batch_size=16, collate_fn=dataset.collate_fn)
     t = dataset.tokenizer
     for batch in data_loader:
         for i in range(3):
-            print(t.decode(batch['input']['input_ids'][i]))
+            print(t.decode(batch['input']['input_ids'][i], skip_special_tokens = True) )
             print(t.decode(batch['label']['input_ids'][i]))
             print()
         pdb.set_trace()    

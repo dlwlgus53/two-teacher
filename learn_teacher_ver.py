@@ -18,7 +18,7 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
 from dataclass_ver import VerifyData
-from utils import filter_data, merge_data
+from utils import filter_data, merge_data, make_label_key
 from evaluate import acc_metric
 
 parser = argparse.ArgumentParser()
@@ -27,6 +27,8 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--labeled_data_path' , type = str)
 parser.add_argument('--valid_data_path' , type = str)
 parser.add_argument('--test_data_path' , type = str)
+parser.add_argument('--use_list_path' , type = str)
+parser.add_argument('--verify_data_path' , type = str)
 
 # training setting
 parser.add_argument('--short' ,  type = int, default=1)
@@ -37,7 +39,8 @@ parser.add_argument('--save_prefix', type = str, help = 'prefix for all savings'
 parser.add_argument('--patient', type = int, help = 'prefix for all savings', default = 3)
 
 # model parameter
-parser.add_argument('--base_trained', type = str, default = "t5-base", help =" pretrainned model from 🤗")
+parser.add_argument('--base_trained', type = str, default = "t5-small", help =" pretrainned model from 🤗")
+parser.add_argument('--fine_trained', type = str)
 parser.add_argument('--batch_size_per_gpu' , type = int, default=8)
 parser.add_argument('--test_batch_size_per_gpu' , type = int, default=16)
 
@@ -50,9 +53,17 @@ def init_experiment(seed):
     torch.cuda.manual_seed(seed)
     torch.cuda.manual_seed_all(seed) # if use multi-GPU
 
+def add_original_label(TF_dict, train_path):
+    labeled_dataset = json.load(open(train_path , "r"))
+    for dial in labeled_dataset:
+        for turn_id, turn in enumerate(dial):
+            dial_id = turn['dial_id']
+            dial_turn_key = make_label_key(dial_id, turn_id)
+            assert dial_turn_key not in TF_dict
+            TF_dict[dial_turn_key] = 'true'
+    return TF_dict
 
-
-def load_trained(self, model, model_path):
+def load_trained(model, model_path):
     state_dict = torch.load(model_path)
     new_state_dict = OrderedDict()
     for k, v in state_dict.items():
@@ -89,12 +100,18 @@ if __name__ =="__main__":
     writer = SummaryWriter()
 
     teacher = T5ForConditionalGeneration.from_pretrained(args.base_trained, return_dict=True)
+    if args.fine_trained:
+        teacher = load_trained(teacher,  args.fine_trained)
     teacher = nn.DataParallel(teacher).cuda()
     tokenizer = T5Tokenizer.from_pretrained(args.base_trained)
+
 
     labeled_dataset = VerifyData(tokenizer, args.labeled_data_path, 'train' , short = args.short) 
     valid_dataset = VerifyData(tokenizer,  args.valid_data_path, 'valid' , short = args.short)
     test_dataset = VerifyData(tokenizer,  args.test_data_path, 'test' , short = args.short)
+    if args.valid_data_path:
+        verify_dataset = VerifyData(tokenizer,  args.verify_data_path, 'test' , short = args.short)
+
 
     optimizer_setting = {
         'warmup_init':False,
@@ -128,5 +145,12 @@ if __name__ =="__main__":
         belief_type = False,
         **trainer_setting)
 
-    teacher_trainer.work(train_data = labeled_dataset,  test = True, save = True, train =True) 
+    teacher_trainer.work(train_data = labeled_dataset,  test = False, save = False, train =False) 
+    if args.valid_data_path:
+        tf_savepath =  f"model/{args.save_prefix}/tf.json"
+        tf_dict = teacher_trainer.make_label(data = verify_dataset)
+        tf_dict = add_original_label(tf_dict, args.labeled_data_path)
+        with open(tf_savepath, 'w') as f: json.dump(tf_dict, f, ensure_ascii=False, indent=4)
+
+
     
