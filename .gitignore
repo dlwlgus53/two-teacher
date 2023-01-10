@@ -1,4 +1,3 @@
-*.sh
 temp*
 logs/
 model/
