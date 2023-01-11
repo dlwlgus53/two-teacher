@@ -1,5 +1,3 @@
-
-
 python learn_teacher_aug.py \
 --short 0 \
 --valid_data_path /home/jihyunlee/pptod/data/multiwoz/data/multi-woz-fine-processed/multiwoz-fine-processed-dev.json \
