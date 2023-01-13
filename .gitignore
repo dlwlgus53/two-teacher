@@ -3,6 +3,8 @@ logs/
 model/
 out/
 runs/
+data/
+*.sh
 *.json
 # Byte-compiled / optimized / DLL files
 __pycache__/
