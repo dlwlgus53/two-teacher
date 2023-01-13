@@ -36,13 +36,25 @@ class DSTMultiWozAugData:
 
     def __len__(self):
         return len(self.dial_id)
-    
+
+    def make_bspn_nospecial(self,dict_bspn):
+        ans =[] # un usual
+        for domain_slot in ontology.all_domain:
+            if domain_slot in dict_bspn:
+                domain,slot = domain_slot.split("-")[0], domain_slot.split("-")[1]
+                if ("[" + domain + ']') not in ans:
+                    ans.append("[" + domain + ']')
+                ans.append(slot)
+                ans.append(dict_bspn[domain_slot])
+        ans = ' '.join(ans)
+        return ans 
+
     def make_value_dict(self, dataset):
         values = defaultdict(list)
         for dial in dataset:
 
             for t_id, turn in enumerate(dial):
-                for key_idx, key in enumerate(ontology.QA['all-domain']): # TODO
+                for key_idx, key in enumerate(ontology.all_domain): # TODO
                     if key in turn['belief']: 
                         belief_answer = turn['belief'][key]
                         if isinstance(belief_answer, list) : belief_answer= belief_answer[0] # in muptiple type, a == ['sunday',6]
@@ -109,7 +121,7 @@ class DSTMultiWozAugData:
     def remove_unuse_domain(self,dst):
         new_dst = {}
         for key in dst:
-            if key in ontology.QA['all-domain']:
+            if key in ontology.all_domain:
                 new_dst[key] = dst[key]
         return new_dst
     def seperate_data(self, dataset):
@@ -130,9 +142,12 @@ class DSTMultiWozAugData:
             for t_id, turn in enumerate(dial):
                 turn['curr_belief'] =self.remove_unuse_domain(turn['curr_belief'])
                 if len(turn['curr_belief']) == 0 :continue
+
+                # should change this part # TODO!!
                 curr_dst = turn['curr_belief']
                 curr_dst_str = str(curr_dst)
                 curr_dst_str = curr_dst_str.replace("{","").replace("}","").replace(": ", ' is ').replace("'","")
+
                 q = f"make dialgoue. DST : {curr_dst_str} System : {system}"
 
                 question.append(q)

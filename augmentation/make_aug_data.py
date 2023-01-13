@@ -20,9 +20,10 @@ import torch
 import random
 import ontology
 import argparse
+from tqdm import tqdm
 from collections import OrderedDict
 from logger_conf import CreateLogger
-
+import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
 
@@ -51,7 +52,7 @@ parser.add_argument('--aug_model_path', type = str,  help =" pretrainned model f
 parser.add_argument('--test_batch_size_per_gpu' , type = int, default=16)
 
 # aug parmeter
-parser.add_argument('--scenario_percent', type = float)
+parser.add_argument('--update_number', type = int)
 
 def init_experiment(seed):
     torch.manual_seed(seed)
@@ -86,7 +87,7 @@ def make_domain_turn_dict(dataset, short=0):
         S +=1
         if short == True and S > 1000:
             break
-        if 'curr_belief' in dial[0] :        
+        if dial[0]['pseudo'] == 1 :        
             for t_id, turn in enumerate(dial):
                 curr_dst = clean_belief_state(turn['curr_belief'])
                 curr_domains = list(set([key.split("-")[0] for key in list(curr_dst.keys())]))
@@ -96,7 +97,6 @@ def make_domain_turn_dict(dataset, short=0):
 
 def clean_belief_state(belief):
     new_belief = {}
-
     for key, value in belief.items():
         if key.startswith("police") or key.startswith("hospital"):
             pass
@@ -110,7 +110,7 @@ def make_value_dict(dataset):
     values = defaultdict(list)
     for dial in dataset:
         for t_id, turn in enumerate(dial):
-            if 'belief' in turn:
+            if turn['pseudo'] == 1:
                 for key_idx, key in enumerate(ontology.QA['all-domain']): # TODO
                     if key in clean_belief_state(turn['belief']): 
                         belief_answer = turn['belief'][key]
@@ -162,6 +162,8 @@ def aug_dst(dst, value_dict): # TODO 현재 turn의 belief state만 중심적으
             dst[slot] = value
         except IndexError as e:
             dst = None
+        except ValueError as e:
+            dst = None
         except:
             pdb.set_trace()
         return dst
@@ -172,76 +174,116 @@ def aug_dst(dst, value_dict): # TODO 현재 turn의 belief state만 중심적으
 
     return result
 
-def update_scenario(dataset, change_rate,  aug_model, tokenizer, short =0):
+
+def make_bspn(dict_bspn):
+    ans =['<sos_b>']
+    for domain_slot in ontology.domain_slot:
+        if domain_slot in dict_bspn:
+            domain,slot = domain_slot.split("-")[0], domain_slot.split("-")[1]
+            if ("[" + domain + ']') not in ans:
+                ans.append("[" + domain + ']')
+            ans.append(slot)
+            ans.append(dict_bspn[domain_slot])
+    ans.append('<eos_b>')
+    ans = ' '.join(ans)
+    return ans 
+
+    
+
+
+
+def update_scenario(dataset, update_number,  aug_model, tokenizer, short =0):
     '''
     doamin_turn_dict; 
     '''
     domain_turn_dict = make_domain_turn_dict(dataset, short)
     value_dict= make_value_dict(dataset)
 
-    changed_dataset = dataset.copy()
+    changed_dataset = dataset
+    only_new_data = []
     S=0
-    for dial in dataset:
+    for dial in tqdm(dataset):
         S +=1
-        if short == True and S > 1000:
+        if short == True and S >5:
             break
         system = "" # should be changed
         stack_dial = []
         aug_cnt = 0
         d_id = dial[0]['dial_id']
-
+        if len(dial)-2 >= update_number:
+            update_turns = np.random.choice(list(range(1,len(dial)-1)), size=update_number, replace=False).tolist()
+        else:
+            update_turns = list(range(1,len(dial)-1))
         for t_id, turn in enumerate(dial):
-            try:
-                turn['belief'] = clean_belief_state(turn['belief'])
-                turn['curr_belief'] = clean_belief_state(turn['curr_belief'])
-                turn['prev_belief'] = clean_belief_state(turn['prev_belief'])
-            except:
-                turn['belief'] = clean_belief_state(turn['pred_belief'])
-                turn['curr_belief'] = clean_belief_state(turn['curr_pred_belief'])
-                turn['prev_belief'] = clean_belief_state(turn['prev_pred_belief'])
-
-            if  len(dial)-1 != t_id and len(turn['belief']) !=0 and random.random()<change_rate:
-                copy_stack = stack_dial.copy()
-                prev_domains = list(set([key.split("-")[0] for key in list(turn['prev_belief'].keys())]))
-
-                change_domain = random.choice(list(set(domain_turn_dict) - set(prev_domains)))
-
-                new_turn = random.choice(domain_turn_dict[change_domain]).copy()
-                new_turn['belief'] = clean_belief_state(new_turn['belief'])
-                new_turn['curr_belief'] = clean_belief_state(new_turn['curr_belief'])
-                new_turn['prev_belief'] = clean_belief_state(new_turn['prev_belief'])
-
-                # add original
-                new_turn_org = new_turn.copy()
+            # 전처리를 한번 해주고?
+            turn = turn.copy()
+            if t_id not in update_turns:
+                stack_dial.append(turn)
+            else :
                 aug_cnt +=1
-                new_turn_org['belief'] = dict(new_turn['curr_belief'], **turn['prev_belief'])
-                new_turn_org['prev_belief'] = turn['prev_belief']
-                new_turn_org['turn_num'] = t_id
-                new_turn_org['dial_id'] = d_id+'_'+str(aug_cnt)
-                copy_stack.append(new_turn_org)
-                changed_dataset.append(copy_stack)
+                copy_stack_dial = stack_dial.copy()
+                
+                prev_domains = list(set([key.split("-")[0] for key in list(turn['prev_belief'].keys())]))
+                change_domain = random.choice(list(set(domain_turn_dict) - set(prev_domains)))
+                
+                new_turn = random.choice(domain_turn_dict[change_domain]).copy()
+                new_turn = new_turn.copy()
+                # update 해야할 것 ==> belief, prev belief, curr belief, bspn, turn_id, dial_id, user
+                
+                new_turn['prev_belief'] = turn['prev_belief']
+                new_turn['turn_num'] = t_id
+                new_turn['dial_id'] = d_id+'_'+str(aug_cnt)
+                new_turn['turn_num'] = t_id
+                
+                dst_list = ['org'] + (aug_dst(new_turn['curr_belief'], value_dict))
+                dst = random.choice(dst_list)
 
-                # add changed
-                dsts = aug_dst(new_turn['curr_belief'], value_dict)
-                for dst in dsts:
-                    copy_stack = stack_dial.copy()
-                    aug_cnt +=1
-                    new_turn_ch = new_turn.copy()
-                    system = "" if t_id ==0 else stack_dial[-1]['resp']
-                    new_turn_ch['curr_belief'] = dst
-                    new_turn_ch['belief'] = dict(new_turn['curr_belief'], **turn['prev_belief'])
-                    new_turn_ch['user'] = generate_user(aug_model, tokenizer, dst, system)
-                    new_turn_ch['turn_num'] = t_id
-                    new_turn_ch['prev_belief'] = turn['prev_belief']
-                    new_turn_ch['prev_belief'] = turn['prev_belief']
-                    new_turn_ch['dial_id'] = d_id+'_'+str(aug_cnt)
 
-                    copy_stack.append(new_turn_ch)
-                    changed_dataset.append(copy_stack)
+                if dst == 'org':
+                    new_turn['belief'] = dict(new_turn['curr_belief'], **new_turn['prev_belief'])
+                    new_turn['bspn'] = make_bspn(new_turn['belief'])
 
-            stack_dial.append(turn)
+                else:
+                    new_turn['curr_belief'] = dst
+                    new_turn['belief'] =dict(new_turn['curr_belief'], **new_turn['prev_belief'])
+                    new_turn['user']= '<sos_u>' + generate_user( aug_model, tokenizer, dst, system) + '<eos_u>'
+                    new_turn['bspn'] = make_bspn(new_turn['belief'])
 
-    return changed_dataset
+
+                copy_stack_dial.append(new_turn)
+                changed_dataset.append(copy_stack_dial)
+                only_new_data.append(copy_stack_dial)
+
+    return only_new_data
+
+def column_clean(data):
+    use_column = ['dial_id', 'turn_num','usdx','resp','bspn','prev_belief','curr_belief','belief','pseudo']
+    for dial in data:
+        for turn in dial:
+            if 'pred_belief' in turn:
+                turn['pseudo'] = 1
+            else:
+                turn['pseudo'] = 0
+            keys = list(turn.keys())
+            
+            for key in keys:
+                if key == 'pred_belief':
+                    turn['belief'] = clean_belief_state(turn['pred_belief'])
+                if key == 'prev_pred_belief':
+                    turn['prev_belief'] =clean_belief_state(turn['prev_pred_belief'])
+                if key == 'curr_pred_belief':
+                    turn['curr_belief'] = clean_belief_state(turn['curr_pred_belief'])
+
+                if key in ['belief', 'curr_belief', 'pred_belief']:
+                    turn[key] = clean_belief_state(turn[key])
+
+
+
+                if key not in use_column:
+                    del turn[key]
+                    
+
+
 
     
 if __name__ =="__main__":
@@ -261,8 +303,10 @@ if __name__ =="__main__":
     aug_model = load_trained(aug_model, args.aug_model_path)
     aug_model = aug_model.cuda()
     tokenizer = T5Tokenizer.from_pretrained(args.base_trained)
+
     raw_dial = json.load(open(args.labeled_data_path , "r"))
-    update_scenario_aug_data = update_scenario(raw_dial, args.scenario_percent,  aug_model, tokenizer, args.short)
+    column_clean(raw_dial)
+    update_scenario_aug_data = update_scenario(raw_dial, args.update_number,  aug_model, tokenizer, args.short)
 
     with open(f"../data/{args.save_prefix}_scenario.json", "w") as f:
         json.dump(update_scenario_aug_data, f, indent = 4)

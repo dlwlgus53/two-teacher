@@ -45,9 +45,21 @@ class VerifyData:
     def remove_unuse_domain(self,dst):
         new_dst = {}
         for key in dst:
-            if key in ontology.QA['all-domain']:
+            if key in ontology.all_domain:
                 new_dst[key] = dst[key]
         return new_dst
+
+    def make_bspn_nospecial(self,dict_bspn):
+        ans =[] # un usual
+        for domain_slot in ontology.all_domain:
+            if domain_slot in dict_bspn:
+                domain,slot = domain_slot.split("-")[0], domain_slot.split("-")[1]
+                if ("[" + domain + ']') not in ans:
+                    ans.append("[" + domain + ']')
+                ans.append(slot)
+                ans.append(dict_bspn[domain_slot])
+        ans = ' '.join(ans)
+        return ans 
 
     def make_value_dict(self, dataset):
         values = defaultdict(list)
@@ -56,7 +68,7 @@ class VerifyData:
                 if 'belief' not in turn:
                         print(f"no belief {turn['dial_id']} {t_id}")
                         continue
-                for key_idx, key in enumerate(ontology.QA['all-domain']): # TODO
+                for key_idx, key in enumerate(ontology.all_domain): # TODO
                     
                     if key in turn['belief']: 
                         belief_answer = turn['belief'][key]
@@ -74,7 +86,8 @@ class VerifyData:
             pass
         return values
 
-    def aug_dst(self,dst, value_dict): # TODO 현재 turn의 belief state만 중심적으로 봐야한다.
+    def aug_dst(self,dst, value_dict, seed): # TODO 현재 turn의 belief state만 중심적으로 봐야한다.
+        random.seed(seed)
 
         def add(dst, value_dict):
             try:
@@ -139,8 +152,8 @@ class VerifyData:
                 turn_text += cfg.USER_tk
                 turn_text += turn['user'].replace("<eos_u>","").replace("<sos_u>","")
                 turn['belief'] =self.remove_unuse_domain(turn['belief'])
-                belief_answer =str(turn['belief']).replace("{","").replace("}","").replace("'","")
-                wrong_belief_answer = str(self.aug_dst(turn['belief'], value_dict)).replace("{","").replace("}","").replace("'","")
+                belief_answer = self.make_bspn_nospecial(turn['belief'])
+                wrong_belief_answer = self.make_bspn_nospecial(self.aug_dst(turn['belief'], value_dict, t_id))
                 q1 = f"verify the question and answer : context : {turn_text}, Answer : {belief_answer}"
                 a1 = 'true'
 
@@ -213,18 +226,18 @@ class VerifyData:
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model_name', type = str, default = 't5-base')
+    parser.add_argument('--model_name', type = str, default = 't5-small')
     parser.add_argument('--labeled_data_path' , type = str, default= '/home/jihyunlee/pptod/data/multiwoz/data/labeled/0.1/labeled_1.json')
     parser.add_argument('--test_data_path' , type = str, default= '/home/jihyunlee/pptod/data/multiwoz/data/multi-woz-fine-processed/multiwoz-fine-processed-test.json')
     
-    parser.add_argument('--base_trained', type = str, default = "t5-base", help =" pretrainned model from 🤗")
+    parser.add_argument('--base_trained', type = str, default = "t5-small", help =" pretrainned model from 🤗")
 
 
     # /home/jihyunlee/woz-data/MultiWOZ_2.1/split0.01/labeled.json
     args = parser.parse_args()
     tokenizer = AutoTokenizer.from_pretrained(args.base_trained)
 
-    dataset = VerifyData(tokenizer, args.test_data_path, 'test', short = 1) 
+    dataset = VerifyData(tokenizer, args.labeled_data_path, 'train', short = 1) 
 
 
     data_loader = torch.utils.data.DataLoader(dataset=dataset, batch_size=16, collate_fn=dataset.collate_fn)

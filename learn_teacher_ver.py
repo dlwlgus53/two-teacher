@@ -109,7 +109,7 @@ if __name__ =="__main__":
     labeled_dataset = VerifyData(tokenizer, args.labeled_data_path, 'train' , short = args.short) 
     valid_dataset = VerifyData(tokenizer,  args.valid_data_path, 'valid' , short = args.short)
     test_dataset = VerifyData(tokenizer,  args.test_data_path, 'test' , short = args.short)
-    if args.valid_data_path:
+    if args.verify_data_path:
         verify_dataset = VerifyData(tokenizer,  args.verify_data_path, 'test' , short = args.short)
 
 
@@ -145,12 +145,13 @@ if __name__ =="__main__":
         belief_type = False,
         **trainer_setting)
 
-    teacher_trainer.work(train_data = labeled_dataset,  test = False, save = False, train =False) 
-    if args.valid_data_path:
+    teacher_trainer.work(train_data = labeled_dataset,  test = True, save = True, train =True) 
+    if args.verify_data_path:
         tf_savepath =  f"model/{args.save_prefix}/tf.json"
         tf_dict = teacher_trainer.make_label(data = verify_dataset)
         tf_dict = add_original_label(tf_dict, args.labeled_data_path)
         with open(tf_savepath, 'w') as f: json.dump(tf_dict, f, ensure_ascii=False, indent=4)
+    print("DONE")
 
 
     

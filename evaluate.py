@@ -40,7 +40,7 @@ def jga_metric(raw_file, all_prediction):
 def jga_metric_long(raw_file, all_prediction):
     pdb.set_trace()
     
-    schema = ontology.QA['all-domain'] # next response 는 제외
+    schema = ontolog.all_domain # next response 는 제외
     turn_acc, joint_acc, micro_f1, unseen_recall, turn_cnt, usr_cnt = 0, 0, 0, 0, 0,0
     
     for key in raw_file.keys():

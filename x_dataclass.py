@@ -288,7 +288,8 @@ class DSTMultiWozData:
         context = []
         dial_text = []
         
-        for d_id in dataset.keys():
+        for d_id in dataset:
+            d_id = dial[0]['dial_id']
             dialogue = dataset[d_id]['log']
             turn_text = ""
 
@@ -378,7 +379,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--model_name', type = str, default = 't5-small')
     parser.add_argument('--all_train_data_path' , type = str, default='../woz-data/MultiWOZ_2.1/split0.01/train_data10.01.json')
-    parser.add_argument('--labeled_data_path' , type = str, default='../woz-data/MultiWOZ_2.1/split0.01/labeled.json')
+    parser.add_argument('--labeled_data_path' , type = str, default='/home/jihyunlee/pptod/data/multiwoz/data/labeled/0.1/labeled_1.json')
     parser.add_argument('--base_trained', type = str, default = "t5-small", help =" pretrainned model from 🤗")
 
 

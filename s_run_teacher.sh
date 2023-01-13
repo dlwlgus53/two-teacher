@@ -1,9 +1,10 @@
 
 
 python learn_teacher.py \
---short 0 \
---valid_data_path /home/jihyunlee/woz-data/MultiWOZ_2.1/dev_data.json \
---labeled_data_path /home/jihyunlee/woz-data/MultiWOZ_2.1/labeled/0.1/labeled_$1.json \
---test_data_path /home/jihyunlee/woz-data/MultiWOZ_2.1/test_data.json \
---max_epoch 10 \
+--short 1 \
+--valid_data_path /home/jihyunlee/pptod/data/multiwoz/data/multi-woz-fine-processed/multiwoz-fine-processed-dev.json \
+--labeled_data_path /home/jihyunlee/pptod/data/multiwoz/data/labeled/0.1/labeled_$1.json \
+--test_data_path /home/jihyunlee/pptod/data/multiwoz/data/multi-woz-fine-processed/multiwoz-fine-processed-test.json \
+--max_epoch 20 \
 --save_prefix ./model/debugging_teacher$1
+
