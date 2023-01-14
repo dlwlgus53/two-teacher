@@ -24,11 +24,10 @@ from evaluate import acc_metric
 parser = argparse.ArgumentParser()
 
 # data setting
-parser.add_argument('--labeled_data_path' , type = str)
-parser.add_argument('--valid_data_path' , type = str)
-parser.add_argument('--test_data_path' , type = str)
-parser.add_argument('--use_list_path' , type = str)
-parser.add_argument('--verify_data_path' , type = str)
+parser.add_argument('--labeled_data_path' , type = str) #train
+parser.add_argument('--valid_data_path' , type = str) # dev
+parser.add_argument('--test_data_path' , type = str) # test
+parser.add_argument('--verify_data_path' , type = str) # make TF
 
 # training setting
 parser.add_argument('--short' ,  type = int, default=1)
@@ -37,7 +36,6 @@ parser.add_argument('--max_epoch' ,  type = int, default=1)
 parser.add_argument('--gpus', default=2, type=int,help='number of gpus per node')
 parser.add_argument('--save_prefix', type = str, help = 'prefix for all savings', default = '')
 parser.add_argument('--patient', type = int, help = 'prefix for all savings', default = 3)
-parser.add_argument('--only_labeling', type = int, default = 0)
 
 # model parameter
 parser.add_argument('--base_trained', type = str, default = "t5-small", help =" pretrainned model from 🤗")
@@ -83,17 +81,6 @@ def find_test_model(test_output_dir):
     fileData = sorted(fileData, key=lambda x : x[-9:])
     return fileData[0:args.test_num]
 
-def save_test_result(test_dataset_path, test_result_dict, save_path):
-    test_dataset = json.load(open(test_dataset_path, "r"))
-    for dial in test_dataset:
-        for turn in dial:
-            d_id = turn['dial_id']
-            t_id = turn['turn_num']
-            turn.update(test_result_dict[d_id][t_id])
-
-    with open(save_path, 'w') as f: json.dump(test_dataset, f, ensure_ascii=False, indent=4)
-
-
 
 if __name__ =="__main__":
     args = parser.parse_args()
@@ -121,8 +108,9 @@ if __name__ =="__main__":
     labeled_dataset = VerifyData(tokenizer, args.labeled_data_path, 'train' , short = args.short) 
     valid_dataset = VerifyData(tokenizer,  args.valid_data_path, 'valid' , short = args.short)
     test_dataset = VerifyData(tokenizer,  args.test_data_path, 'test' , short = args.short)
-    if args.verify_data_path:
-        verify_dataset = VerifyData(tokenizer,  args.verify_data_path, 'label' , short = args.short)
+    
+    if args.valid_data_path:
+        verify_dataset = VerifyData(tokenizer,  args.verify_data_path, 'test' , short = args.short)
 
 
     optimizer_setting = {
@@ -156,15 +144,14 @@ if __name__ =="__main__":
         evaluate_fnc = acc_metric, 
         belief_type = False,
         **trainer_setting)
-    if args.only_labeling == 0:
-        teacher_trainer.work(train_data = labeled_dataset,  test = True, save = True, train =True) 
-        save_test_result(args.test_data_path,teacher_trainer.test_result_dict , f"model/{args.save_prefix}/test.json")
+
+    teacher_trainer.work(train_data = labeled_dataset,  test = True, save = True, train =True) 
 
     if args.verify_data_path:
-        tf_savepath =  args.save_prefix + "model.json"
+        tf_savepath =  f"model/{args.save_prefix}/tf.json"
         tf_dict = teacher_trainer.make_label(data = verify_dataset)
+        tf_dict = add_original_label(tf_dict, args.labeled_data_path)
         with open(tf_savepath, 'w') as f: json.dump(tf_dict, f, ensure_ascii=False, indent=4)
-    print("DONE")
 
 
     

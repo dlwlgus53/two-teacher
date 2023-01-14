@@ -31,13 +31,15 @@ class VerifyData:
         else:
             use_list = None
 
-        dial_id, turn_id, question, answer = self.seperate_data(self.raw_dataset, use_list)
+        dial_id, turn_id, question, answer,belief, pseudo = self.seperate_data(self.raw_dataset, use_list)
         assert len(question) == len(answer)
 
         self.target = answer
         self.turn_id = turn_id
         self.dial_id = dial_id
         self.question = question
+        self.belief = belief
+        self.pseudo = pseudo
 
     def __len__(self):
         return len(self.question)
@@ -132,10 +134,11 @@ class VerifyData:
 
     def seperate_data(self, dataset, use_list = None):
         value_dict = self.make_value_dict(dataset)
-        question = []
+        question, pseudo = [], []
         answer = []
         dial_id = []
         turn_id = []
+        belief = []
         dial_num = 0
         S = 0
         for dial in dataset:
@@ -153,30 +156,39 @@ class VerifyData:
                 turn_text += turn['user'].replace("<eos_u>","").replace("<sos_u>","")
                 turn['belief'] =self.remove_unuse_domain(turn['belief'])
                 belief_answer = self.make_bspn_nospecial(turn['belief'])
-                wrong_belief_answer = self.make_bspn_nospecial(self.aug_dst(turn['belief'], value_dict, t_id))
+                neg_belief = self.aug_dst(turn['belief'], value_dict, t_id)
+                wrong_belief_answer = self.make_bspn_nospecial(neg_belief)
+
                 q1 = f"verify the question and answer : context : {turn_text}, Answer : {belief_answer}"
                 a1 = 'true'
+                b1 = turn['belief']
 
                 q2 = f"verify the question and answer : context : {turn_text}, Answer : {wrong_belief_answer}"
                 a2 = 'false'
+                b2  = neg_belief
+
+                p = turn['pseudo']
 
                 question.append(q1)
                 answer.append(a1)
                 dial_id.append(d_id)
                 turn_id.append(t_id)
+                belief.append(b1)
+                pseudo.append(p)
 
-                if self.data_type != 'test':
+                if self.data_type != 'label':
                     question.append(q2)
                     answer.append(a2)
                     dial_id.append(d_id)
                     turn_id.append(t_id)
-
+                    belief.append(b1)
+                    pseudo.append(p)
 
                 turn_text += cfg.SYSTEM_tk
                 turn_text += turn['resp'].replace("<eos_r>","").replace("<sos_r>","")
         
         print(f"total dial num is {dial_num}")
-        return dial_id, turn_id, question, answer 
+        return dial_id, turn_id, question, answer, belief, pseudo
 
 
     def encode(self, texts ,return_tensors="pt"):
@@ -200,7 +212,9 @@ class VerifyData:
         question = self.question[index]
         turn_id = self.turn_id[index]
         dial_id = self.dial_id[index]
-        return {"question": question, "target": target, "turn_id" : turn_id,"dial_id" : dial_id, }
+        belief = self.belief[index]
+        pseudo = self.pseudo[index]
+        return {"question": question, "target": target, "turn_id" : turn_id,"dial_id" : dial_id, 'belief' : belief, 'pseudo' : pseudo}
     
 
     def collate_fn(self, batch):
@@ -212,6 +226,9 @@ class VerifyData:
         target = [x["target"] for x in batch]
         turn_id = [x["turn_id"] for x in batch]
         dial_id = [x["dial_id"] for x in batch]
+        belief = [x["belief"] for x in batch]
+        pseudo = [x["pseudo"] for x in batch]
+
 
 
         source = self.encode(input_source)
@@ -221,7 +238,7 @@ class VerifyData:
         target = self.tokenizer.batch_encode_plus(target, max_length = self.max_length, \
         padding=True, return_tensors='pt', truncation = True)
 
-        return {"input": source, "label": target, "turn_id" : turn_id,"dial_id" : dial_id}
+        return {"input": source, "label": target, "turn_id" : turn_id,"dial_id" : dial_id, 'belief' : belief, 'pseudo' : pseudo}
 
 
 if __name__ == '__main__':

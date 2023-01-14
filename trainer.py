@@ -22,7 +22,7 @@ class mwozTrainer:
         self.optimizer = optimizer
         self.writer = SummaryWriter()
         self.logger = CreateLogger(logger_name, os.path.join(log_folder,'info.log'))
-        self.save_prefix = f'{save_prefix}_{logger_name}'
+        self.save_prefix =save_prefix
         self.train_data = train_data
         self.valid_data = valid_data
         self.test_data = test_data
@@ -33,6 +33,7 @@ class mwozTrainer:
         self.patient = patient
         self.evaluate_fnc = evaluate_fnc
         self.belief_type= belief_type
+        self.test_result_dict = {}
         os.makedirs(f"model/{self.save_prefix}",  exist_ok=True)
 
     def work(self, train_data = None, test = False, train = True, save = False, model_path = None) :
@@ -83,7 +84,7 @@ class mwozTrainer:
         self.model = AutoModel.from_pretrained(base_model, return_dict=True)
 
     def make_label(self, data):
-        generated_label = {}
+        generated_label = []
         max_iter = int(len(data) / self.test_batch_size)
         loader = torch.utils.data.DataLoader(dataset=data, batch_size=self.test_batch_size,\
             collate_fn=data.collate_fn)
@@ -99,8 +100,11 @@ class mwozTrainer:
                 for idx in range(len(outputs_text)):
                     dial_id = batch['dial_id'][idx]
                     turn_id = batch['turn_id'][idx]
+                    pseudo = batch['pseudo'][idx]
                     label_key = make_label_key(dial_id, turn_id)
-                    generated_label[label_key] = outputs_text[idx]
+                    pred = outputs_text[idx]
+                    if pred == 'true' or pseudo == 0:
+                        generated_label.append(label_key)
 
                 if (iter + 1) % 50 == 0:
                     self.logger.info(f"Labeling : {iter+1}/{max_iter}")
@@ -166,31 +170,36 @@ class mwozTrainer:
         self.logger.info(f"Epoch {epoch_num} Validation loss : {loss_sum/iter:.4f}")
         return  loss_sum/iter
 
-
-    
-
-
     def test(self):
         answer, pred = [], []
         test_max_iter = int(len(self.test_data) / self.test_batch_size)
         test_loader = torch.utils.data.DataLoader(dataset=self.test_data, batch_size=self.test_batch_size,\
             collate_fn=self.test_data.collate_fn)
+        result_dict= defaultdict(lambda : defaultdict(dict))# dial_id, # turn_id # schema
         self.model.eval()
         loss_sum = 0
         self.logger.info("Test start")
         with torch.no_grad():
             for iter,batch in enumerate(test_loader):
+                input_text = self.tokenizer.batch_decode(batch['input']['input_ids'], skip_special_tokens = True)
                 outputs_text = self.model.module.generate(input_ids=batch['input']['input_ids'].to('cuda'))
                 outputs_text =self.tokenizer.batch_decode(outputs_text, skip_special_tokens = True)
                 label =self.tokenizer.batch_decode(batch['label']['input_ids'], skip_special_tokens = True)
                 pred.extend(outputs_text)
                 answer.extend(label)
+
                 for idx in range(len(outputs_text)):
                     outputs_text[idx]
+
+                for d_id, t_id, b, a, p in zip(batch['dial_id'],batch['turn_id'], batch['belief'],label, outputs_text):
+                    if a == 'false':
+                        result_dict[d_id][t_id]['neg'] = {'belief' : b, 'ans' :a,'pred' : p}
+                    else:
+                        result_dict[d_id][t_id]['org'] = {'belief' : b, 'ans' :a,'pred' : p}
+
+        self.test_result_dict = result_dict
         return answer, pred
     
-
-
     def string_to_dict(slef, belief_str):
         belief_dict = {}
         items = belief_str.split(",")
