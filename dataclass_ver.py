@@ -162,8 +162,8 @@ class VerifyData:
                 q1 = f"verify the question and answer : context : {turn_text}, Answer : {belief_answer}"
                 a1 = 'true'
                 b1 = turn['belief']
-                p = turn['pesudo']
-                
+                p = turn['pseudo']
+
                 question.append(q1)
                 answer.append(a1)
                 dial_id.append(d_id)
