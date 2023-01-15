@@ -159,9 +159,9 @@ if __name__ =="__main__":
     if args.only_labeling == 0:
         teacher_trainer.work(train_data = labeled_dataset,  test = True, save = True, train =True) 
         save_test_result(args.test_data_path,teacher_trainer.test_result_dict , f"model/{args.save_prefix}/test.json")
-
+    print("test end")
     if args.verify_data_path:
-        tf_savepath =  args.save_prefix + "model.json"
+        tf_savepath =  args.save_prefix + "model2.json"
         tf_dict = teacher_trainer.make_label(data = verify_dataset)
         with open(tf_savepath, 'w') as f: json.dump(tf_dict, f, ensure_ascii=False, indent=4)
     print("DONE")
