@@ -111,7 +111,7 @@ def make_value_dict(dataset):
     for dial in dataset:
         for t_id, turn in enumerate(dial):
             if turn['pseudo'] == 1:
-                for key_idx, key in enumerate(ontology.QA['all-domain']): # TODO
+                for key_idx, key in enumerate(ontology.all_domain): # TODO
                     if key in clean_belief_state(turn['belief']): 
                         belief_answer = turn['belief'][key]
                         if isinstance(belief_answer, list) : belief_answer= belief_answer[0] # in muptiple type, a == ['sunday',6]
@@ -177,7 +177,7 @@ def aug_dst(dst, value_dict): # TODO 현재 turn의 belief state만 중심적으
 
 def make_bspn(dict_bspn):
     ans =['<sos_b>']
-    for domain_slot in ontology.domain_slot:
+    for domain_slot in ontology.all_domain:
         if domain_slot in dict_bspn:
             domain,slot = domain_slot.split("-")[0], domain_slot.split("-")[1]
             if ("[" + domain + ']') not in ans:
@@ -187,7 +187,6 @@ def make_bspn(dict_bspn):
     ans.append('<eos_b>')
     ans = ' '.join(ans)
     return ans 
-
     
 
 
@@ -215,14 +214,12 @@ def update_scenario(dataset, update_number,  aug_model, tokenizer, short =0):
         else:
             update_turns = list(range(1,len(dial)-1))
         for t_id, turn in enumerate(dial):
-            # 전처리를 한번 해주고?
             turn = turn.copy()
             if t_id not in update_turns:
                 stack_dial.append(turn)
-            else :
+            else : # update turn 
                 aug_cnt +=1
                 copy_stack_dial = stack_dial.copy()
-                
                 prev_domains = list(set([key.split("-")[0] for key in list(turn['prev_belief'].keys())]))
                 change_domain = random.choice(list(set(domain_turn_dict) - set(prev_domains)))
                 
@@ -236,6 +233,8 @@ def update_scenario(dataset, update_number,  aug_model, tokenizer, short =0):
                 new_turn['turn_num'] = t_id
                 
                 dst_list = ['org'] + (aug_dst(new_turn['curr_belief'], value_dict))
+
+
                 dst = random.choice(dst_list)
 
 
@@ -256,33 +255,21 @@ def update_scenario(dataset, update_number,  aug_model, tokenizer, short =0):
 
     return only_new_data
 
-def column_clean(data):
-    use_column = ['dial_id', 'turn_num','usdx','resp','bspn','prev_belief','curr_belief','belief','pseudo']
+
+                
+def add_prev_curr_belief(data):
     for dial in data:
+        prev_belief = {}
         for turn in dial:
-            if 'pred_belief' in turn:
-                turn['pseudo'] = 1
-            else:
-                turn['pseudo'] = 0
-            keys = list(turn.keys())
-            
-            for key in keys:
-                if key == 'pred_belief':
-                    turn['belief'] = clean_belief_state(turn['pred_belief'])
-                if key == 'prev_pred_belief':
-                    turn['prev_belief'] =clean_belief_state(turn['prev_pred_belief'])
-                if key == 'curr_pred_belief':
-                    turn['curr_belief'] = clean_belief_state(turn['curr_pred_belief'])
-
-                if key in ['belief', 'curr_belief', 'pred_belief']:
-                    turn[key] = clean_belief_state(turn[key])
-
-
-
-                if key not in use_column:
-                    del turn[key]
-                    
-
+            belief = turn['belief']
+            curr_belief = dict(set(belief.items()) - set(prev_belief.items()))
+            item = {
+                'belief' :belief,
+                'curr_belief' : curr_belief,
+                'prev_belief' : prev_belief
+            }
+            turn.update(item)
+            prev_belief = belief
 
 
     
@@ -305,10 +292,11 @@ if __name__ =="__main__":
     tokenizer = T5Tokenizer.from_pretrained(args.base_trained)
 
     raw_dial = json.load(open(args.labeled_data_path , "r"))
-    column_clean(raw_dial)
+    add_prev_curr_belief(raw_dial)
+    
     update_scenario_aug_data = update_scenario(raw_dial, args.update_number,  aug_model, tokenizer, args.short)
-
-    with open(f"../data/{args.save_prefix}_scenario.json", "w") as f:
+    os.makedirs(args.save_prefix, exist_ok = True)
+    with open(f"{args.save_prefix}/_scenario.json", "w") as f:
         json.dump(update_scenario_aug_data, f, indent = 4)
 
 
