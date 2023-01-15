@@ -130,7 +130,7 @@ class VerifyData:
         result = [add(dst.copy(), value_dict), delete(dst.copy()), replace(dst.copy(), value_dict)]
         result = [i for i in  result if i is not None]
 
-        return random.choice(result)
+        return result
 
     def seperate_data(self, dataset, use_list = None):
         value_dict = self.make_value_dict(dataset)
@@ -162,13 +162,8 @@ class VerifyData:
                 q1 = f"verify the question and answer : context : {turn_text}, Answer : {belief_answer}"
                 a1 = 'true'
                 b1 = turn['belief']
-
-                q2 = f"verify the question and answer : context : {turn_text}, Answer : {wrong_belief_answer}"
-                a2 = 'false'
-                b2  = neg_belief
-
-                p = turn['pseudo']
-
+                p = turn['pesudo']
+                
                 question.append(q1)
                 answer.append(a1)
                 dial_id.append(d_id)
@@ -177,12 +172,19 @@ class VerifyData:
                 pseudo.append(p)
 
                 if self.data_type != 'label':
-                    question.append(q2)
-                    answer.append(a2)
-                    dial_id.append(d_id)
-                    turn_id.append(t_id)
-                    belief.append(b1)
-                    pseudo.append(p)
+                    for neg_belief in self.aug_dst(turn['belief'], value_dict, t_id):
+                        wrong_belief_answer = self.make_bspn_nospecial(neg_belief)
+
+                        q2 = f"verify the question and answer : context : {turn_text}, Answer : {wrong_belief_answer}"
+                        a2 = 'false'
+                        b2  = neg_belief
+                    
+                        question.append(q2)
+                        answer.append(a2)
+                        dial_id.append(d_id)
+                        turn_id.append(t_id)
+                        belief.append(b1)
+                        pseudo.append(p)
 
                 turn_text += cfg.SYSTEM_tk
                 turn_text += turn['resp'].replace("<eos_r>","").replace("<sos_r>","")
