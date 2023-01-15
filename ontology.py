@@ -9,6 +9,7 @@ all_domain = [
     "attraction-type",
     "attraction-name",
     "attraction-area",
+    
     "hotel-pricerange",
     "hotel-type",
     "hotel-parking",
@@ -19,19 +20,22 @@ all_domain = [
     "hotel-people",
     "hotel-area",
     "hotel-stay",
+
     "restaurant-time",
     "restaurant-pricerange",
     "restaurant-day",
     "restaurant-area",
+    "restaurant-food",
+    "restaurant-name",
+    "restaurant-people",
+
     "train-destination",
     "train-departure",
     "train-arrive",
     "train-day",
     "train-people",
     "train-leave",
-    "restaurant-food",
-    "restaurant-name",
-    "restaurant-people",
+
     "taxi-leave",
     "taxi-destination",
     "taxi-arrive",
