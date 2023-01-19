@@ -11,7 +11,7 @@ from torch.utils.tensorboard import SummaryWriter
 from utils import make_label_key
 from collections import OrderedDict
 
-from transformers import AutoModel
+from transformers import AutoModel 
 
 # from utils import save_pickle
 class mwozTrainer:
@@ -22,7 +22,7 @@ class mwozTrainer:
         self.optimizer = optimizer
         self.writer = SummaryWriter()
         self.logger = CreateLogger(logger_name, os.path.join(log_folder,'info.log'))
-        self.save_prefix = f'{save_prefix}_{logger_name}'
+        self.save_prefix = f'{save_prefix}'
         self.train_data = train_data
         self.valid_data = valid_data
         self.test_data = test_data

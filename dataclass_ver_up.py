@@ -15,10 +15,9 @@ import config as cfg
 from utils import make_label_key, dictionary_split
 from collections import defaultdict
 
-
-
 all_sos_token_list = ['<sos_b>', '<sos_a>', '<sos_r>']
 all_eos_token_list = ['<eos_b>', '<eos_a>', '<eos_r>']
+
 class VerifyData:
     def __init__(self, tokenizer, data_path, data_type,  short = 0, use_list_path = None):
         self.tokenizer = tokenizer
@@ -130,7 +129,7 @@ class VerifyData:
         result = [add(dst.copy(), value_dict), delete(dst.copy()), replace(dst.copy(), value_dict)]
         result = [i for i in  result if i is not None]
 
-        return random.choice(result)
+        return result
 
     def seperate_data(self, dataset, use_list = None):
         value_dict = self.make_value_dict(dataset)
@@ -163,25 +162,34 @@ class VerifyData:
                 b1 = turn['belief']
                 p = turn['pseudo']
 
-                question.append(q1)
-                answer.append(a1)
-                dial_id.append(d_id)
-                turn_id.append(t_id)
-                belief.append(b1)
-                pseudo.append(p)
+
 
                 if self.data_type != 'label':
-                    neg_belief = self.aug_dst(turn['belief'], value_dict, t_id)
-                    wrong_belief_answer = self.make_bspn_nospecial(neg_belief)
-                    q2 = f"verify the question and answer : context : {turn_text}, Answer : {wrong_belief_answer}"
-                    a2 = 'false'
-                    b2  = neg_belief
-                
-                    question.append(q2)
-                    answer.append(a2)
+                    for neg_belief in self.aug_dst(turn['belief'], value_dict, t_id):
+                        wrong_belief_answer = self.make_bspn_nospecial(neg_belief)
+                        q2 = f"verify the question and answer : context : {turn_text}, Answer : {wrong_belief_answer}"
+                        a2 = 'false'
+                        b2  = neg_belief
+                    
+                        question.append(q2)
+                        answer.append(a2)
+                        dial_id.append(d_id)
+                        turn_id.append(t_id)
+                        belief.append(b2)
+                        pseudo.append(p)
+
+                        question.append(q1)
+                        answer.append(a1)
+                        dial_id.append(d_id)
+                        turn_id.append(t_id)
+                        belief.append(b1)
+                        pseudo.append(p)
+                else:
+                    question.append(q1)
+                    answer.append(a1)
                     dial_id.append(d_id)
                     turn_id.append(t_id)
-                    belief.append(b2)
+                    belief.append(b1)
                     pseudo.append(p)
 
                 turn_text += cfg.SYSTEM_tk
